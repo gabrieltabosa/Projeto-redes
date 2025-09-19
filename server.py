@@ -41,6 +41,30 @@ def process_handshake(sock_client):
         print(">> [SERVIDOR] ERRO: Formato de SYN inválido.")
         return None, None
 
+#Recebendo mesnagens cliente
+def comunicacao_cliente(sock_client):
+    while True:
+        print("\nAguardando mensagem do Client...")
+        #Recebe a mensagem do cliente
+        data = sock_client.recv(1024).decode('utf-8')
+        #Se estiver vazia, encerra a conexão
+        if not data:
+            break
+        print("Mensagem recebida:", data)
+
+        #Verifica o tipo da mensagem e responde
+        parts = data.split('|')
+        if parts[0] == "MSG":
+            resposta = "RESPONSE|Mensagem recebida com sucesso!"
+            sock_client.send(resposta.encode('utf-8'))
+        elif parts[0] == "NACK":
+            resposta = "NACK|Erro no pacote"
+            sock_client.send(resposta.encode('utf-8'))
+        else:
+            resposta = "NACK|Formato de mensagem inválido"
+            sock_client.send(resposta.encode('utf-8'))
+    print("Cliente desconectado!")
+
 
 def main():
 
@@ -59,6 +83,8 @@ def main():
 
     if modo and tam_max:
         print(f">> [SERVIDOR] Modo de operação: {modo}, Tamanho máximo de pacote: {tam_max}")
+        #Inicia a troca de mensagens
+        comunicacao_cliente(sock_client)
 
     sock.close()
     

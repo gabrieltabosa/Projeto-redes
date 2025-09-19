@@ -46,6 +46,16 @@ def handshake(sock):
     else:
         print_titulo("ERRO NO HANDSHAKE")
 
+def comunicacao_server(sock, message):
+    #Enviando mensagem ao servidor
+    msg = f"MSG|{message}"
+    sock.send(msg.encode('utf-8'))
+
+    #Recebendo resposta do servidor
+    resposta = sock.recv(1024).decode('utf-8')
+    print(f">> [CLIENTE] Resposta do servidor:{resposta}")
+
+
 def main():
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -56,6 +66,20 @@ def main():
     else:
         # Realiza o handshake com o servidor
         handshake(sock)
+
+        #Troca de mensagem com o Servidor
+        while True:
+            #Recebendo mensagem do cliente
+            message = input("\nDigite sua mensagem (ou 'sair' para encerrar): ")
+
+            #Enviando mensagem para o servidor
+            comunicacao_server(sock, message)
+
+            #Se o usuário digitar 'sair', o loop é interrompido
+            if message.lower() == 'sair':
+                print("Desconectando do servidor...")
+                break
+            
     finally:
         # Fecha a conexão
         sock.close()
