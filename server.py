@@ -1,34 +1,66 @@
 import socket
 
-def main():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+def print_titulo(texto):
+    print("\n" + "=" * 80)
+    print(f"{texto.center(80)}")
+    print("=" * 80 + "\n")
 
+def process_handshake(sock_client):
+    print_titulo("AGUARDANDO HANDSHAKE DO CLIENTE")
+
+    #1. Recebendo o SYN do cliente
+    print(">> [SERVIDOR] Recebendo SYN do cliente...")
+    resposta_syn = sock_client.recv(1024).decode('utf-8')
+    print(f">> [SERVIDOR] SYN recebido: {resposta_syn}")
+
+    #Confere o Handshake e separa o modo de operação e o tamanho máximo
+    parts = resposta_syn.split('|')
+    if parts[0] == "SYN" and len(parts) == 3:
+        modo = parts[1]  
+        tam_max = int(parts[2])  
+        
+        
+        #2. Envia SYN-ACK para o cliente
+        mensagem_syn_ack = f"SYN-ACK|{modo}|{tam_max}"
+        print(f"\n>> [SERVIDOR] Enviando SYN-ACK para o cliente: {mensagem_syn_ack}")
+        sock_client.send(mensagem_syn_ack.encode('utf-8'))
+
+        #3. Recebendo ACK
+        print("\n>> [SERVIDOR] Aguardando ACK...")
+        resposta_ack = sock_client.recv(1024).decode('utf-8')
+        print(">> [SERVIDOR] ACK recebido")
+
+        if "ACK" == resposta_ack.split("|")[0]:
+            print_titulo("HANDSHAKE DE 3 VIAS COMPLETO")
+            return modo, tam_max
+        else:
+            print(">> [SERVIDOR] ERRO: ACK não recebido corretamente.")
+            return None, None
+    else:
+        sock_client.send("Erro no handshake\n".encode('utf-8'))
+        print(">> [SERVIDOR] ERRO: Formato de SYN inválido.")
+        return None, None
+
+
+def main():
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(('localhost', 1500))
 
     sock.listen(1)
+    print(f"\n>> [SERVIDOR] Ouvindo em localhost 1500")
 
-    max_amount = 255
+    #Aceitando conexão com o cliente
+    sock_client, endereco = sock.accept()
 
-    print("waitng for three way handshake...")
+    #Realiza o handshake
+    modo, tam_max = process_handshake(sock_client)
+    print(f">> [SERVIDOR] Cliente de endereço: {endereco}, conectado!")
 
-    sock_client, client_adrres = sock.accept()
+    if modo and tam_max:
+        print(f">> [SERVIDOR] Modo de operação: {modo}, Tamanho máximo de pacote: {tam_max}")
 
-    syn = sock_client.recv(max_amount).decode()
-
-    if syn:
-        y = int(syn.split()[1])
-
-        print(f"Server received: {syn}")
-
-        seq = 5
-
-        sock_client.sendall(str("ACK=" + str(y+1) + " SYN=" + str(seq)).encode('utf-8'))
-
-        ack = sock_client.recv(max_amount).decode()
-        
-        if ack:
-            print(f"Server received: {ack}")
-
+    sock.close()
     
 if __name__ == "__main__":
     main()
