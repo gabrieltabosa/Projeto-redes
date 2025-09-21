@@ -41,12 +41,43 @@ def process_handshake(sock_client):
         print(">> [SERVIDOR] ERRO: Formato de SYN inválido.")
         return None, None
 
+#Recebendo mesnagens cliente
+def comunicacao_cliente(sock_client):
+    while True:
+        print("\nAguardando mensagem do Client...")
+        #Recebe a mensagem do cliente
+        data = sock_client.recv(1024).decode('utf-8')
+        #Se estiver vazia(o que indica que o cliente se  desconectou ), encerra a conexão
+        if not data:
+            break
+        print("Mensagem recebida:", data)
+
+        #Verifica o tipo da mensagem e responde
+        parts = data.split('|')
+        if parts[0] == "MSG":
+            resposta = "RESPONSE|Mensagem recebida com sucesso!"
+            sock_client.send(resposta.encode('utf-8'))
+        elif parts[0] == "NACK":
+            # o pacote foi enviado mas houve erro no pacote 
+            resposta = "NACK|Erro no pacote"
+            # pedindo a mensagem novamente com send 
+
+            sock_client.send(resposta.encode('utf-8'))
+        else:
+            # o caso de não houver nack ou de não voltar a mensagem 
+            resposta = "NACK|Formato de mensagem inválido"
+            # pedindo a mensagem novamente com send 
+            sock_client.send(resposta.encode('utf-8'))
+    print("Cliente desconectado!")
+
 
 def main():
-
+    # cria um objeto socket TCP
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    
     sock.bind(('localhost', 1500))
-
+     ## Set socket option to reuse address (helps avoid "Address already in use" errors)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.listen(1)
     print(f"\n>> [SERVIDOR] Ouvindo em localhost 1500")
 
@@ -59,6 +90,8 @@ def main():
 
     if modo and tam_max:
         print(f">> [SERVIDOR] Modo de operação: {modo}, Tamanho máximo de pacote: {tam_max}")
+        #Inicia a troca de mensagens
+        comunicacao_cliente(sock_client)
 
     sock.close()
     
