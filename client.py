@@ -70,15 +70,35 @@ def main():
         handshake(sock)
 
         #Troca de mensagem com o Servidor
+
         while True:
-            #Recebendo mensagem do cliente
-            message = input("\nDigite sua mensagem (ou 'sair' para encerrar): ")
 
-            #Enviando mensagem para o servidor
-            comunicacao_server(sock, message)
+            #recebendo tamanho da janela do servidor
+            resposta = sock.recv(1024).decode('utf-8')
 
-            #Se o usuário digitar 'sair', o loop é interrompido
-            if message.lower() == 'sair':
+            tamanho_janela = 0
+
+            #modificando para inteiro o tamanho da janela com try catch
+            try:
+                tamanho_janela = int(resposta)
+                print(f">> [CLIENTE] Tamanho da janela do servidor recebido: {tamanho_janela}")
+            except ValueError:
+                print(f">> [CLIENTE] Erro ao receber o tamanho da janela: {resposta}")
+
+            for i in range(tamanho_janela):
+                #Recebendo mensagem do cliente
+                message = input("\nDigite sua mensagem")
+
+                #Enviando mensagem para o servidor
+                comunicacao_server(sock, message)
+
+            if tamanho_janela == 0:
+                print("Tamanho da janela é 0, esperando atualização...")
+                continue
+
+            #opção de sair apos a rajada com um input
+            sair = input("Digite 'sair' para encerrar a conexão ou pressione Enter para continuar...")
+            if sair.lower() == 'sair':
                 print("Desconectando do servidor...")
                 break
             

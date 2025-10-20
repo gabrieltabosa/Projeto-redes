@@ -1,4 +1,5 @@
 import socket
+import random
 
 def print_titulo(texto):
     print("\n" + "=" * 80)
@@ -43,6 +44,12 @@ def process_handshake(sock_client):
 
 #Recebendo mesnagens cliente
 def comunicacao_cliente(sock_client):
+    #enviando tamanho da janela para o cliente
+
+    tamanho_janela = 5
+    print(f">> [SERVIDOR] Enviando tamanho da janela para o cliente: {tamanho_janela}")
+    sock_client.send(str(tamanho_janela).encode('utf-8'))
+
     while True:
         print("\nAguardando mensagem do Client...")
         #Recebe a mensagem do cliente
@@ -52,7 +59,6 @@ def comunicacao_cliente(sock_client):
             break
         print("Mensagem recebida:", data)
 
-        #Verifica o tipo da mensagem e responde
         parts = data.split('|')
         if parts[0] == "MSG":
             resposta = "RESPONSE|Mensagem recebida com sucesso!"
@@ -68,6 +74,16 @@ def comunicacao_cliente(sock_client):
             resposta = "NACK|Formato de mensagem inválido"
             # pedindo a mensagem novamente com send 
             sock_client.send(resposta.encode('utf-8'))
+
+        tamanho_janela-=1
+
+        if (tamanho_janela <= 0):
+            print("\nJanela cheia. Redefinindo a janela...\n")
+            #defina janela por um numero aleatorio entre 1 e 5 e envie pro servidor
+            tamanho_janela = random.randint(1,5)  
+            print(f">> [SERVIDOR] Enviando tamanho da janela para o cliente: {tamanho_janela}")
+            sock_client.send(str(tamanho_janela).encode('utf-8'))
+
     print("Cliente desconectado!")
 
 
