@@ -1,3 +1,4 @@
+import random
 import socket
 
 def print_titulo(texto):
@@ -46,15 +47,23 @@ def handshake(sock):
     else:
         print_titulo("ERRO NO HANDSHAKE")
 
-def comunicacao_server(sock, message):
-    #Enviando mensagem ao servidor
-    msg = f"MSG|{message}"
+def comunicacao_server(sock, message ,seq):
+    flag = 'MSG'
+    
+    #define uma chance em 4 para perder a mensagem e flag ser PERDA, implemente de outra forma    
+    if random.randint(1, 4) == 1:
+        flag = 'PERDA'
+        print(f">> [CLIENTE] Simulando perda de mensagem: {message}")
+
+    msg = f"{flag}|{message}|{seq}"
     sock.send(msg.encode('utf-8'))
 
     #Recebendo resposta do servidor
     resposta = sock.recv(1024).decode('utf-8')
     # recv : recebe dados de um socket conectado 
     print(f">> [CLIENTE] Resposta do servidor:{resposta}")
+
+    return seq+1
 
 def main():
     try:
@@ -70,15 +79,36 @@ def main():
         handshake(sock)
 
         #Troca de mensagem com o Servidor
+        seq = random.randint(0, 255)
+
         while True:
-            #Recebendo mensagem do cliente
-            message = input("\nDigite sua mensagem (ou 'sair' para encerrar): ")
 
-            #Enviando mensagem para o servidor
-            comunicacao_server(sock, message)
+            #recebendo tamanho da janela do servidor
+            resposta = sock.recv(1024).decode('utf-8')
 
-            #Se o usuário digitar 'sair', o loop é interrompido
-            if message.lower() == 'sair':
+            tamanho_janela = 0
+
+            #modificando para inteiro o tamanho da janela com try catch
+            try:
+                tamanho_janela = int(resposta)
+                print(f">> [CLIENTE] Tamanho da janela do servidor recebido: {tamanho_janela}")
+            except ValueError:
+                print(f">> [CLIENTE] Erro ao receber o tamanho da janela: {resposta}")
+
+            for i in range(tamanho_janela):
+                #Recebendo mensagem do cliente
+                message = input("\nDigite sua mensagem")
+
+                #Enviando mensagem para o servidor
+                seq = comunicacao_server(sock, message, seq)
+
+            if tamanho_janela == 0:
+                print("Tamanho da janela é 0, esperando atualização...")
+                continue
+
+            #opção de sair apos a rajada com um input
+            sair = input("Digite 'sair' para encerrar a conexão ou pressione Enter para continuar...")
+            if sair.lower() == 'sair':
                 print("Desconectando do servidor...")
                 break
             
