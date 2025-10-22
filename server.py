@@ -50,6 +50,8 @@ def comunicacao_cliente(sock_client):
     print(f">> [SERVIDOR] Enviando tamanho da janela para o cliente: {tamanho_janela}")
     sock_client.send(str(tamanho_janela).encode('utf-8'))
 
+    rec = 0
+
     while True:
         print("\nAguardando mensagem do Client...")
         #Recebe a mensagem do cliente
@@ -59,9 +61,16 @@ def comunicacao_cliente(sock_client):
             break
         print("Mensagem recebida:", data)
 
+        #Caso a mensagem seja do tipo MSG, incremente o numero de reconhecimento e envie um ACK. Se for Perda, não atualize o numero de reconhecimento e envie um ACK
+
         parts = data.split('|')
         if parts[0] == "MSG":
-            resposta = "RESPONSE|Mensagem recebida com sucesso!"
+            # modifique a string resposta e adicione um '\n' com o ACK em seguida
+            rec = int(parts[2]) + 1
+
+            resposta = "RESPONSE|Mensagem recebida com sucesso!\n" \
+            f"ACK:{rec}"
+
             sock_client.send(resposta.encode('utf-8'))
         elif parts[0] == "NACK":
             # o pacote foi enviado mas houve erro no pacote 
@@ -69,11 +78,18 @@ def comunicacao_cliente(sock_client):
             # pedindo a mensagem novamente com send 
 
             sock_client.send(resposta.encode('utf-8'))
+        elif parts[0] == "PERDA":
+            resposta = "NACK|Mensagem perdida, por favor reenvie\n" \
+            f"ACK:{rec}"
+
+            # pedindo a mensagem novamente com send 
+            sock_client.send(resposta.encode('utf-8'))
         else:
             # o caso de não houver nack ou de não voltar a mensagem 
             resposta = "NACK|Formato de mensagem inválido"
             # pedindo a mensagem novamente com send 
             sock_client.send(resposta.encode('utf-8'))
+
 
         tamanho_janela-=1
 

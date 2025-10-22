@@ -1,3 +1,4 @@
+import random
 import socket
 
 def print_titulo(texto):
@@ -46,15 +47,23 @@ def handshake(sock):
     else:
         print_titulo("ERRO NO HANDSHAKE")
 
-def comunicacao_server(sock, message):
-    #Enviando mensagem ao servidor
-    msg = f"MSG|{message}"
+def comunicacao_server(sock, message ,seq):
+    flag = 'MSG'
+    
+    #define uma chance em 4 para perder a mensagem e flag ser PERDA, implemente de outra forma    
+    if random.randint(1, 4) == 1:
+        flag = 'PERDA'
+        print(f">> [CLIENTE] Simulando perda de mensagem: {message}")
+
+    msg = f"{flag}|{message}|{seq}"
     sock.send(msg.encode('utf-8'))
 
     #Recebendo resposta do servidor
     resposta = sock.recv(1024).decode('utf-8')
     # recv : recebe dados de um socket conectado 
     print(f">> [CLIENTE] Resposta do servidor:{resposta}")
+
+    return seq+1
 
 def main():
     try:
@@ -70,6 +79,7 @@ def main():
         handshake(sock)
 
         #Troca de mensagem com o Servidor
+        seq = random.randint(0, 255)
 
         while True:
 
@@ -90,7 +100,7 @@ def main():
                 message = input("\nDigite sua mensagem")
 
                 #Enviando mensagem para o servidor
-                comunicacao_server(sock, message)
+                seq = comunicacao_server(sock, message, seq)
 
             if tamanho_janela == 0:
                 print("Tamanho da janela é 0, esperando atualização...")
