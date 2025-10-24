@@ -60,34 +60,45 @@ def comunicacao_server(sock, message ,seq):
 
     msg = f"{flag}|{message}|{seq}"
     
-    while True:
-        try:
+    try:
+        sock.send(msg.encode('utf-8'))
+        
+        sock.settimeout(RETRANSMISSION_TIMEOUT)
+        
+        #Recebendo resposta do servidor
+        resposta = sock.recv(1024).decode('utf-8')
+        # recv : recebe dados de um socket conectado 
+        sock.settimeout(None)
+        
+        print(f">> [CLIENTE] Resposta do servidor:{resposta}")
+
+        if "ACK" in resposta and "NACK" not in resposta:
+            return seq + 1 # Sucesso, próximo número de sequência
+        else:
+            # Se for NACK, retransmita o pacote
+            print(">> [CLIENTE] NACK recebido. Retransmitindo...")
             sock.send(msg.encode('utf-8'))
-            
-            sock.settimeout(RETRANSMISSION_TIMEOUT)
-            
-            #Recebendo resposta do servidor
-            resposta = sock.recv(1024).decode('utf-8')
-            # recv : recebe dados de um socket conectado 
-            sock.settimeout(None)
-            
-            print(f">> [CLIENTE] Resposta do servidor:{resposta}")
 
-            if "ACK" in resposta:
-                return seq + 1 # Sucesso, próximo número de sequência
-            else:
-                # Se for NACK sem ACK, retransmite
-                print(">> [CLIENTE] NACK recebido. Retransmitindo...")
+    except socket.timeout:
+        print("\n>> [CLIENTE] TIMER ESTOUROU") 
+        print(f">> [CLIENTE] TIMEOUT! Retransmitindo: {msg}")
+    except Exception as e:
+        print(f"Erro de socket na comunicação: {e}")
+        raise e
 
-        except socket.timeout:
-            print("\n>> [CLIENTE] TIMER ESTOUROU") 
-            print(f">> [CLIENTE] TIMEOUT! Retransmitindo: {msg}")
-        except Exception as e:
-            print(f"Erro de socket na comunicação: {e}")
-            raise e
 
+'''crie uma função que faça o seguinte:
+- receber como parametro: tamanho maximo de caracteres por janela e a mensagem a ser enviada
+- dividir a mensagem em partes de acordo com o tamanho maximo de caracteres por janela
+- retornar uma lista com as partes da mensagem dividida'''
+def dividir_mensagem(tamanho_maximo, mensagem):
+    partes = []
+    for i in range(0, len(mensagem), tamanho_maximo):
+        partes.append(mensagem[i:i + tamanho_maximo])
+    return partes
 
 def main():
+
     try:
         # metodo socket : cria um objeto socket TCP
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -107,29 +118,54 @@ def main():
             seq = random.randint(0, 255)
 
             while True:
-                #recebendo tamanho da janela do servidor
+                #recebendo tamanho de pacotes por janela do servidor
                 sock.settimeout(None)
                 resposta = sock.recv(1024).decode('utf-8')
 
-                tamanho_janela = 0
+                #recebdendo tamanho maximo de caracteres por janela do servidor
+                resposta_caracteres = sock.recv(1024).decode('utf-8')
+
+                qnt_pacotes = 0
 
                 #modificando para inteiro o tamanho da janela com try catch
                 try:
-                    tamanho_janela = int(resposta)
-                    print(f"\n>> [CLIENTE] Tamanho da janela do servidor recebido: {tamanho_janela}")
+                    qnt_pacotes = int(resposta)
+                    print(f"\n>> [CLIENTE] Tamanho da janela do servidor recebido: {qnt_pacotes}")
                 except ValueError:
                     print(f">> [CLIENTE] Erro ao receber o tamanho da janela: {resposta}")
 
-                if tamanho_janela == 0:
+                #modificando para inteiro o tamanho maximo de caracteres por janela com try catch
+                try:
+                    tamanho_caracteres = int(resposta_caracteres)
+                    print(f">> [CLIENTE] Tamanho máximo de caracteres por janela do servidor recebido: {tamanho_caracteres}")
+                except ValueError:
+                    print(f">> [CLIENTE] Erro ao receber o tamanho máximo de caracteres por janela: {resposta_caracteres}")
+
+                if qnt_pacotes == 0:
                     print("Tamanho da janela é 0, esperando atualização...")
                     continue
-                    
-                for i in range(tamanho_janela):
-                    #Recebendo mensagem do cliente
-                    message = input(f"\nDigite sua mensagem [{i+1}/{tamanho_janela}]: ")
 
-                    #Enviando mensagem para o servidor
-                    seq = comunicacao_server(sock, message, seq)
+                if tamanho_caracteres == 0:
+                    print("Tamanho máximo de caracteres por janela é 0, esperando atualização...")
+                    continue
+
+                message = input(f"\nDigite sua mensagem")
+
+                pacotes = dividir_mensagem(tamanho_caracteres, message)
+
+                print(pacotes)
+
+                #crie outro loop aninhada que envie os pacotes de acordo com o tamanho de pacotes por janela
+                for i in range(len(pacotes)):
+                    #Recebendo mensagem do cliente
+
+                    for x in range(qnt_pacotes):
+                        if i + x < len(pacotes):
+                            print(f"\n>> [CLIENTE] Enviando pacote {i + x + 1}/{len(pacotes)}: {pacotes[i + x]}")
+                            #Enviando mensagem para o servidor
+                            seq = comunicacao_server(sock, pacotes[i + x], seq)
+
+                    i += qnt_pacotes - 1  # Ajusta o índice para pular os pacotes já enviados
 
                 #opção de sair apos a rajada com um input
                 sair = input("\nDigite 'sair' para encerrar a conexão ou pressione Enter para continuar...")

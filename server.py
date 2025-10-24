@@ -2,7 +2,7 @@ import socket
 import random
 
 HANDSHAKE_TIMEOUT = 10.0
-INACTIVITY_TIMEOUT = 60.0
+INACTIVITY_TIMEOUT = 300.0
 
 def print_titulo(texto):
     print("\n" + "=" * 80)
@@ -60,9 +60,14 @@ def process_handshake(sock_client):
 
 #recebendo mesnagens cliente
 def comunicacao_cliente(sock_client):
-    tamanho_janela = 5
+    tamanho_janela = 2
     print(f">> [SERVIDOR] Enviando tamanho da janela para o cliente: {tamanho_janela}")
     sock_client.send(str(tamanho_janela).encode('utf-8'))
+
+    #mande para o remetente a quantidade de caracteres permitidos na janela
+    tamanho_caracteres = 2
+    print(f">> [SERVIDOR] Enviando tamanho máximo de caracteres por janela para o cliente: {tamanho_caracteres}")
+    sock_client.send(str(tamanho_caracteres).encode('utf-8'))
 
     rec = None 
 
@@ -137,15 +142,15 @@ def comunicacao_cliente(sock_client):
                 sock_client.send(resposta.encode('utf-8'))
 
             # A lógica de janela só deve decrementar se um pacote NOVO for aceito
-            if flag == "MSG" and seq_recebido == rec - 1:
-                tamanho_janela -= 1
+            #if flag == "MSG" and seq_recebido == rec - 1:
+            #   tamanho_janela -= 1
 
-            if (tamanho_janela <= 0):
+            '''if (tamanho_janela <= 0):
                 print("\nJanela cheia. Redefinindo a janela...\n")
                 #define a janela por um numero aleatorio entre 1 e 5 e envie pro servidor
                 tamanho_janela = random.randint(1,5)
                 print(f">> [SERVIDOR] Enviando tamanho da janela para o cliente: {tamanho_janela}")
-                sock_client.send(str(tamanho_janela).encode('utf-8'))
+                sock_client.send(str(tamanho_janela).encode('utf-8'))'''
 
         except socket.timeout:
             print("\n>> [SERVIDOR] TIMER ESTOUROU") 
