@@ -50,71 +50,99 @@ def process_handshake(sock_client):
             return None, None
             
     except socket.timeout:
-        print("\n>> [SERVIDOR] O TIMER ESTOUROU!") 
-        print(f">> [SERVIDOR] ERRO: Timeout no handshake.")
+        print("\n>> [SERVIDOR] TIMER ESTOUROU") 
+        print(f">> [SERVIDOR] ERRO: Timeout no handshake")
         return None, None
     except Exception as e:
         print(f"\n>> [SERVIDOR] ERRO inesperado no handshake: {e}")
         return None, None
 
 
-#Recebendo mesnagens cliente
+#recebendo mesnagens cliente
 def comunicacao_cliente(sock_client):
-    #enviando tamanho da janela para o cliente
     tamanho_janela = 5
     print(f">> [SERVIDOR] Enviando tamanho da janela para o cliente: {tamanho_janela}")
     sock_client.send(str(tamanho_janela).encode('utf-8'))
 
-    rec = 0
+    rec = None 
 
     while True:
         try:
             print("\nAguardando mensagem do Client...")
             sock_client.settimeout(INACTIVITY_TIMEOUT)
-            #Recebe a mensagem do cliente
+            #recebe a mensagem do cliente
             data = sock_client.recv(1024).decode('utf-8')
             sock_client.settimeout(None)
             
-            #Se estiver vazia(o que indica que o cliente se  desconectou ), encerra a conexão
+            #se estiver vazia(o que indica que o cliente se desconectou ), encerra a conexão
             if not data:
                 print(">> [SERVIDOR] Cliente encerrou a conexão.")
                 break
             print("Mensagem recebida:", data)
 
-            #Caso a mensagem seja do tipo MSG, incremente o numero de reconhecimento e envie um ACK. Se for Perda, não atualize o numero de reconhecimento e envie um ACK
-
             parts = data.split('|')
-            if parts[0] == "MSG":
+            resposta = ""
+            
+            # tenta extrair a flag e o número de sequência
+            if len(parts) < 3:
+                 flag = parts[0]
+                 seq_recebido = -1
+            else:
+                 flag = parts[0]
+                 try:
+                    seq_recebido = int(parts[2])
+                 except ValueError:
+                    seq_recebido = -1
+
+            # inicializa 'rec' com o primeiro pacote MSG que chega
+            if rec is None and flag == "MSG" and seq_recebido >= 0:
+                 rec = seq_recebido
+            
+            # define o valor de ACK para a resposta
+            ack_response = rec if rec is not None else 0 
+
+            #caso a mensagem seja do tipo MSG, verifique o seq, incremente o numero de reconhecimento e envie um ACK. Se for Perda, não atualize o numero de reconhecimento e envie um ACK
+            if flag == "MSG":
+                if seq_recebido == rec:
+                    # pacote esperado, incrementa o reconhecimento.
+                    rec += 1
+                    ack_response = rec # o ACK agora aponta para o próximo (rec+1)
+                    mensagem_status = "Mensagem recebida com sucesso!"
+                elif seq_recebido < rec and seq_recebido >= 0:
+                    # pacote duplicado (reenvio). Apenas reenviamos o ACK anterior (o 'rec' atual).
+                    mensagem_status = f"Mensagem duplicada (seq={seq_recebido}). ACK reenviado."
+                else:
+                    # pacote fora de ordem (só acontece em modos GBN/SR)
+                    mensagem_status = f"Pacote fora de ordem (Esperado: {rec}, Recebido: {seq_recebido})."
+
                 # modifique a string resposta e adicione um '\n' com o ACK em seguida
-                rec = int(parts[2]) + 1
+                resposta = f"RESPONSE|{mensagem_status}\nACK:{ack_response}"
 
-                resposta = "RESPONSE|Mensagem recebida com sucesso!\n" \
-                f"ACK:{rec}"
-
-                sock_client.send(resposta.encode('utf-8'))
-            elif parts[0] == "NACK":
-                # o pacote foi enviado mas houve erro no pacote
-                resposta = "NACK|Erro no pacote"
-                # pedindo a mensagem novamente com send
                 sock_client.send(resposta.encode('utf-8'))
                 
-            elif parts[0] == "PERDA":
+            elif flag == "PERDA":
+                # se for perda, não atualize o numero de reconhecimento e envie um ACK
                 resposta = "NACK|Mensagem perdida, por favor reenvie\n" \
-                f"ACK:{rec}"
+                f"ACK:{ack_response}" # Usa o rec atual
 
-                # pedindo a mensagem novamente com send
                 sock_client.send(resposta.encode('utf-8'))
+                
+            elif flag == "NACK":
+                resposta = "NACK|Erro no pacote"
+                sock_client.send(resposta.encode('utf-8'))
+                
             else:
                 # o caso de não houver nack ou de não voltar a mensagem
                 resposta = "NACK|Formato de mensagem inválido"
-                # pedindo a mensagem novamente com send
                 sock_client.send(resposta.encode('utf-8'))
 
-            tamanho_janela -= 1
+            # A lógica de janela só deve decrementar se um pacote NOVO for aceito
+            if flag == "MSG" and seq_recebido == rec - 1:
+                tamanho_janela -= 1
 
             if (tamanho_janela <= 0):
                 print("\nJanela cheia. Redefinindo a janela...\n")
-                #defina janela por um numero aleatorio entre 1 e 5 e envie pro servidor
+                #define a janela por um numero aleatorio entre 1 e 5 e envie pro servidor
                 tamanho_janela = random.randint(1,5)
                 print(f">> [SERVIDOR] Enviando tamanho da janela para o cliente: {tamanho_janela}")
                 sock_client.send(str(tamanho_janela).encode('utf-8'))
