@@ -50,7 +50,8 @@ def process_handshake(sock_client):
             return None, None
             
     except socket.timeout:
-        print(f"\n>> [SERVIDOR] ERRO: Timeout no handshake.")
+        print("\n>> [SERVIDOR] O TIMER ESTOUROU!") 
+        print(f">> [SERVIDOR] ERRO: Timeout no handshake.")
         return None, None
     except Exception as e:
         print(f"\n>> [SERVIDOR] ERRO inesperado no handshake: {e}")
@@ -74,7 +75,7 @@ def comunicacao_cliente(sock_client):
             data = sock_client.recv(1024).decode('utf-8')
             sock_client.settimeout(None)
             
-            #Se estiver vazia(o que indica que o cliente se  desconectou ), encerra a conexão
+            #Se estiver vazia(o que indica que o cliente se  desconectou ), encerra a conexão
             if not data:
                 print(">> [SERVIDOR] Cliente encerrou a conexão.")
                 break
@@ -119,7 +120,8 @@ def comunicacao_cliente(sock_client):
                 sock_client.send(str(tamanho_janela).encode('utf-8'))
 
         except socket.timeout:
-            print(f"\n>> [SERVIDOR] ERRO: Cliente inativo. Encerrando conexão.")
+            print("\n>> [SERVIDOR] TIMER ESTOUROU") 
+            print(f">> [SERVIDOR] ERRO: Cliente inativo. Encerrando conexão.")
             break
         except Exception as e:
             print(f"\n>> [SERVIDOR] ERRO na comunicação: {e}. Encerrando conexão.")

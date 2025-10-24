@@ -80,7 +80,8 @@ def comunicacao_server(sock, message ,seq):
                 print(">> [CLIENTE] NACK recebido. Retransmitindo...")
 
         except socket.timeout:
-            print(f"\n>> [CLIENTE] TIMEOUT! Retransmitindo: {msg}")
+            print("\n>> [CLIENTE] O TIMER ESTOUROU!") # Mensagem adicionada
+            print(f">> [CLIENTE] TIMEOUT! Retransmitindo: {msg}")
         except Exception as e:
             print(f"Erro de socket na comunicação: {e}")
             raise e
