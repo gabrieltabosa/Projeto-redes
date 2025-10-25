@@ -110,17 +110,19 @@ def handshake(sock):
 
 
 def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela):
-    seq = seq_inicial
+    seq_base = seq_inicial # O início da janela (o ACK que esperamos)
     total_pacotes = len(pacotes)
-    num = 0
+    num_pacote_enviado = 0 # O índice do pacote na lista `pacotes`
 
-    while num < total_pacotes:
+    while num_pacote_enviado < total_pacotes:
         # Cria a janela atual
-        janela = pacotes[num:num + tamanho_janela]
-        print(f"\n>> [CLIENTE] Enviando janela {(num // tamanho_janela) + 1} com {len(janela)} pacotes... (Base: {seq})")
+        idx_inicio = num_pacote_enviado
+        idx_fim = min(num_pacote_enviado + tamanho_janela, total_pacotes)
+        janela = pacotes[idx_inicio:idx_fim]
+        
+        print(f"\n>> [CLIENTE] Enviando janela (Pacotes {idx_inicio+1} a {idx_fim} de {total_pacotes})... (Base: {seq_base})")
 
         # --- LÓGICA DE SIMULAÇÃO DE FALHA ---
-        # Decide se *esta janela* terá uma falha
         tipo_falha = "NENHUMA"
         if random.randint(1, 3) == 1: # 33% de chance de falha na janela
             tipo_falha = random.choice(["PERDA", "CORRUPCAO"])
@@ -128,26 +130,28 @@ def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela):
         pacote_com_falha = -1
         if tipo_falha != "NENHUMA":
             pacote_com_falha = random.randint(0, len(janela) - 1)
-            print(f">> [CLIENTE] (SIMULANDO FALHA: {tipo_falha} no pacote {num + pacote_com_falha + 1})")
+            print(f">> [CLIENTE] (SIMULANDO FALHA: {tipo_falha} no pacote {idx_inicio + pacote_com_falha + 1})")
         # --- FIM DA SIMULAÇÃO ---
             
         # Envia todos os pacotes da janela (pipelining)
         for i, msg in enumerate(janela):
             flag = "MSG"
+            seq_atual = seq_base + i
             
             # Aplica a falha, se houver
             if i == pacote_com_falha:
                 if tipo_falha == "PERDA":
-                    print(f">> [CLIENTE] (Pulando envio do pacote {num + i + 1}...)")
+                    print(f">> [CLIENTE] (Pulando envio do pacote {idx_inicio + i + 1}...)")
                     continue # Simplesmente não envia o pacote
                 elif tipo_falha == "CORRUPCAO":
-                    flag = "PERDA" # Reutilizando a flag "PERDA" como corrupção (ou poderia corromper o checksum)
+                    # Enviamos com flag "PERDA" para simular corrupção
+                    flag = "PERDA" 
 
-            data_pacote = f"{flag}|{msg}|{seq + i}"
+            data_pacote = f"{flag}|{msg}|{seq_atual}"
             checksum = calculate_checksum(data_pacote)
             pacote_msg = f"{data_pacote}|{checksum}"
             
-            print(f">> [CLIENTE] Enviando pacote {num + i + 1}/{total_pacotes} (SEQ={seq + i})")
+            print(f">> [CLIENTE] Enviando pacote {idx_inicio + i + 1}/{total_pacotes} (SEQ={seq_atual})")
             sock.send(pacote_msg.encode('utf-8'))
             time.sleep(0.01) # Pequeno delay para não sobrecarregar o buffer do servidor
 
@@ -164,24 +168,27 @@ def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela):
                 continue
                 
             ack_parts = data_ack.split(':')
-            if data_ack.startswith("ACK") and int(ack_parts[1]) >= seq + len(janela):
+            ack_num = int(ack_parts[1])
+            
+            # Se o ACK for o que esperamos (ACK cumulativo para o fim da janela)
+            if data_ack.startswith("ACK") and ack_num >= seq_base + len(janela):
                 # Sucesso, desliza a janela
                 print(">> [CLIENTE] ACK cumulativo recebido. Janela enviada com sucesso.")
-                seq += len(janela)
-                num += tamanho_janela
+                num_pacote_enviado += len(janela) # Avança o número de pacotes enviados
+                seq_base += len(janela) # Avança a base
             else:
                 # NACK ou ACK fora da ordem
-                print(">> [CLIENTE] NACK recebido ou ACK inesperado — retransmitindo janela atual...")
-                # retransmite a mesma janela (não incrementa 'num' ou 'seq')
+                print(f">> [CLIENTE] NACK recebido ou ACK inesperado (Esperado: >= {seq_base + len(janela)}, Recebido: {ack_num}) — retransmitindo janela atual...")
+                # retransmite a mesma janela (não incrementa 'num_pacote_enviado' ou 'seq_base')
                 continue
 
         except socket.timeout:
-            print(f"\n>> [CLIENTE] TIMEOUT (esperando ACK para base {seq}) — retransmitindo janela atual...")
-            # retransmite a mesma janela (não incrementa 'num' ou 'seq')
+            print(f"\n>> [CLIENTE] TIMEOUT (esperando ACK para base {seq_base}) — retransmitindo janela atual...")
+            # retransmite a mesma janela (não incrementa)
             continue
 
-    print("\n>> [CLIENTE] Todos os pacotes foram enviados com sucesso!")
-    return seq
+    print("\n>> [CLIENTE] Todos os pacotes da mensagem foram enviados com sucesso!")
+    return seq_base # Retorna o novo número de sequência para a próxima mensagem
 
 
 def dividir_mensagem(tamanho_maximo, mensagem):
@@ -220,16 +227,16 @@ def main():
                     print("Valores devem ser maiores que 0.")
                     continue
 
-                # 2. Informa ao servidor a configuração
-                # O servidor precisa saber quantos pacotes esperar!
-                config_msg = f"{qnt_pacotes}"
-                print(f">> [CLIENTE] Enviando configuração da janela para o servidor: {config_msg} pacotes")
-                sock.send(config_msg.encode('utf-8'))
-
-                # 3. Lendo e Segmentando a Mensagem
+                # 2. Lendo e Segmentando a Mensagem
                 message = input(f"\nDigite sua mensagem: ")
                 pacotes = dividir_mensagem(tamanho_caracteres, message)
                 print(f">> [CLIENTE] Mensagem dividida em {len(pacotes)} pacotes.")
+
+                # 3. Informa ao servidor a configuração (Janela E Total)
+                #    Isso é enviado DEPOIS de segmentar, para sabermos o total
+                config_msg = f"{qnt_pacotes}|{len(pacotes)}"
+                print(f">> [CLIENTE] Enviando configuração (Janela={qnt_pacotes}, Total={len(pacotes)})")
+                sock.send(config_msg.encode('utf-8'))
 
                 # 4. Envia a mensagem em janelas Go-Back-N
                 seq = enviar_janela(sock, pacotes, seq, qnt_pacotes)
