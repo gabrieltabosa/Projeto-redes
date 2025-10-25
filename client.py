@@ -61,8 +61,6 @@ def comunicacao_server(sock, message ,seq):
     try:
         sock.send(msg.encode('utf-8'))
         
-      
-        
         #Recebendo resposta do servidor
         resposta = sock.recv(1024).decode('utf-8')
         # recv : recebe dados de um socket conectado 
@@ -152,34 +150,17 @@ def main():
             # Realiza o handshake com o servidor
             handshake(sock)
 
-            #Troca de mensagem com o Servidor
-            seq = random.randint(0, 255)
 
             while True:
-                #recebendo tamanho de pacotes por janela do servidor
-                sock.settimeout(None)
-                resposta = sock.recv(1024).decode('utf-8')
+                #Troca de mensagem com o Servidor
+                seq = random.randint(0, 255)
 
-                #recebdendo tamanho maximo de caracteres por janela do servidor
-                resposta_caracteres = sock.recv(1024).decode('utf-8')
+                #recebendo tamanho de pacotes por janela do servidor, o cliente que definirá a janela comum input
+                qnt_pacotes = int(input("\n>> [CLIENTE] Defina o tamanho da janela (número de pacotes por janela): "))
+
+                #o  cliente define a qnt de caracteres enviados por pacotes
+                tamanho_caracteres = int(input("\n>> [CLIENTE] Defina o tamanho máximo de caracteres por pacote: "))
                 
-
-                qnt_pacotes = 0
-
-                #modificando para inteiro o tamanho da janela com try catch
-                try:
-                    qnt_pacotes = int(resposta)
-                    print(f"\n>> [CLIENTE] Tamanho da janela do servidor recebido: {qnt_pacotes}")
-                except ValueError:
-                    print(f">> [CLIENTE] Erro ao receber o tamanho da janela: {resposta}")
-
-                #modificando para inteiro o tamanho maximo de caracteres por janela com try catch
-                try:
-                    tamanho_caracteres = int(resposta_caracteres)
-                    print(f">> [CLIENTE] Tamanho máximo de caracteres por janela do servidor recebido: {tamanho_caracteres}")
-                except ValueError:
-                    print(f">> [CLIENTE] Erro ao receber o tamanho máximo de caracteres por janela: {resposta_caracteres}")
-
                 if qnt_pacotes == 0:
                     print("Tamanho da janela é 0, esperando atualização...")
                     continue

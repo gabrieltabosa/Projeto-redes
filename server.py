@@ -60,19 +60,15 @@ def process_handshake(sock_client):
 
 #recebendo mesnagens cliente
 def comunicacao_cliente(sock_client):
-    tamanho_janela = 2
-    print(f">> [SERVIDOR] Enviando tamanho da janela para o cliente: {tamanho_janela}")
-    sock_client.send(str(tamanho_janela).encode('utf-8'))
-
-    #mande para o remetente a quantidade de caracteres permitidos na janela
-    tamanho_caracteres = 2
-    print(f">> [SERVIDOR] Enviando tamanho máximo de caracteres por janela para o cliente: {tamanho_caracteres}")
-    sock_client.send(str(tamanho_caracteres).encode('utf-8'))
 
     rec = None
     base = 0
 
     while True:
+
+        #Utilize o timeout de inatividade para encerrar a conexão caso o cliente fique muito tempo sem enviar mensagens
+        sock_client.settimeout(INACTIVITY_TIMEOUT)
+
         try:
             print("\nAguardando mensagem do Client...")
             
