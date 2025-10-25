@@ -1,12 +1,54 @@
 import random
 import socket
+import time
 
-RETRANSMISSION_TIMEOUT = 3.0
+RETRANSMISSION_TIMEOUT = 5.0 # Aumentei o timeout para dar tempo da janela ser processada
+
+# ==============================================================================
+# FUNÇÕES AUXILIARES (Impressão e Checksum)
+# ==============================================================================
 
 def print_titulo(texto):
     print("\n" + "=" * 80)
     print(f"{texto.center(80)}")
     print("=" * 80 + "\n")
+
+def calculate_checksum(data_str: str) -> int:
+    """
+    Calcula um checksum simples de soma de 16 bits.
+    """
+    checksum = 0
+    for char in data_str:
+        # Soma o valor ASCII/UTF-8 de cada caractere
+        checksum += ord(char)
+    # Garante que o resultado esteja dentro de 16 bits (0-65535)
+    return checksum % 65536 
+
+def verify_checksum(full_packet: str) -> (bool, str):
+    """
+    Verifica o checksum de um pacote completo.
+    Retorna (True, data_part) se válido, ou (False, None) se inválido.
+    """
+    try:
+        # Divide o pacote na última ocorrência de '|'
+        data_part, received_checksum_str = full_packet.rsplit('|', 1)
+        received_checksum = int(received_checksum_str)
+        
+        # Recalcula o checksum com base na parte dos dados
+        calculated_checksum = calculate_checksum(data_part)
+        
+        if received_checksum == calculated_checksum:
+            return (True, data_part)  # Checksum OK
+        else:
+            return (False, None) # Checksum falhou
+            
+    except (ValueError, IndexError):
+        # Ocorreu um erro se o pacote não tiver '|' ou o checksum não for um número
+        return (False, None) # Pacote malformado
+
+# ==============================================================================
+# LÓGICA DO PROTOCOLO (Handshake e Comunicação GBN)
+# ==============================================================================
 
 def handshake(sock):
     print_titulo("INICIANDO HANDSHAKE COM O SERVIDOR")
@@ -30,7 +72,11 @@ def handshake(sock):
     tam_max = "1024"
     print(f"\n>> [CLIENTE] Tamanho pré-definido de mensagem: {tam_max}")
     
-    mensagem = f"SYN|{modo}|{tam_max}"
+    # Adiciona checksum
+    data_syn = f"SYN|{modo}|{tam_max}"
+    checksum_syn = calculate_checksum(data_syn)
+    mensagem = f"{data_syn}|{checksum_syn}"
+    
     print(f"\n>> [CLIENTE] Enviando SYN para o servidor: {mensagem}")
     sock.send(mensagem.encode('utf-8'))
 
@@ -39,48 +85,29 @@ def handshake(sock):
     resposta = sock.recv(1024).decode('utf-8')
     print(f">> [CLIENTE] Resposta recebida: {resposta}")
 
-    # Conferindo resposta
-    partes = resposta.split("|")
-    if resposta.startswith("SYN-ACK") and partes[1] == modo and partes[2] == tam_max:
+    # Verifica o checksum
+    is_valid, data_syn_ack = verify_checksum(resposta)
+    if not is_valid:
+        print_titulo("ERRO NO HANDSHAKE - Checksum do SYN-ACK inválido")
+        raise Exception("Falha no Handshake: Checksum inválido")
+
+    # Conferindo resposta (usando data_syn_ack verificado)
+    partes = data_syn_ack.split("|")
+    if data_syn_ack.startswith("SYN-ACK") and partes[1] == modo and partes[2] == tam_max:
         # 3. Enviando ACK ao servidor
         print("\n>> [CLIENTE] Enviando ACK para o servidor...")
-        sock.send("ACK".encode('utf-8'))
+        
+        # Adiciona checksum
+        data_ack = "ACK"
+        checksum_ack = calculate_checksum(data_ack)
+        mensagem_ack = f"{data_ack}|{checksum_ack}"
+        
+        sock.send(mensagem_ack.encode('utf-8'))
         print_titulo("HANDSHAKE COM O SERVIDOR ESTABELECIDO")
     else:
         print_titulo("ERRO NO HANDSHAKE")
         raise Exception("Falha no Handshake")
 
-def comunicacao_server(sock, message ,seq):
-    flag = 'MSG'
-    
-    #define uma chance em 4 para perder a mensagem e flag ser PERDA, implemente de outra forma     
-    
-    
-    msg = f"{flag}|{message}|{seq}"
-    
-    try:
-        sock.send(msg.encode('utf-8'))
-        
-        #Recebendo resposta do servidor
-        resposta = sock.recv(1024).decode('utf-8')
-        # recv : recebe dados de um socket conectado 
-        
-        
-        print(f">> [CLIENTE] Resposta do servidor:{resposta}")
-
-        if "ACK" in resposta and "NACK" not in resposta:
-            return seq + 1 # Sucesso, próximo número de sequência
-        else:
-            # Se for NACK, retransmita o pacote
-            print(">> [CLIENTE] NACK recebido. Retransmitindo...")
-            sock.send(msg.encode('utf-8'))
-
-    except socket.timeout:
-        print("\n>> [CLIENTE] TIMER ESTOUROU") 
-        print(f">> [CLIENTE] TIMEOUT! Retransmitindo: {msg}")
-    except Exception as e:
-        print(f"Erro de socket na comunicação: {e}")
-        raise e
 
 def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela):
     seq = seq_inicial
@@ -90,44 +117,77 @@ def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela):
     while num < total_pacotes:
         # Cria a janela atual
         janela = pacotes[num:num + tamanho_janela]
-        print(f"\n>> [CLIENTE] Enviando janela {(num // tamanho_janela) + 1} com {len(janela)} pacotes...")
+        print(f"\n>> [CLIENTE] Enviando janela {(num // tamanho_janela) + 1} com {len(janela)} pacotes... (Base: {seq})")
 
-        # Envia todos os pacotes da janela
+        # --- LÓGICA DE SIMULAÇÃO DE FALHA ---
+        # Decide se *esta janela* terá uma falha
+        tipo_falha = "NENHUMA"
+        if random.randint(1, 3) == 1: # 33% de chance de falha na janela
+            tipo_falha = random.choice(["PERDA", "CORRUPCAO"])
+            
+        pacote_com_falha = -1
+        if tipo_falha != "NENHUMA":
+            pacote_com_falha = random.randint(0, len(janela) - 1)
+            print(f">> [CLIENTE] (SIMULANDO FALHA: {tipo_falha} no pacote {num + pacote_com_falha + 1})")
+        # --- FIM DA SIMULAÇÃO ---
+            
+        # Envia todos os pacotes da janela (pipelining)
         for i, msg in enumerate(janela):
             flag = "MSG"
-            pacote_msg = f"{flag}|{msg}|{seq + i}"
-            print(f">> [CLIENTE] Enviando pacote {num + i + 1}/{total_pacotes}: {msg}")
+            
+            # Aplica a falha, se houver
+            if i == pacote_com_falha:
+                if tipo_falha == "PERDA":
+                    print(f">> [CLIENTE] (Pulando envio do pacote {num + i + 1}...)")
+                    continue # Simplesmente não envia o pacote
+                elif tipo_falha == "CORRUPCAO":
+                    flag = "PERDA" # Reutilizando a flag "PERDA" como corrupção (ou poderia corromper o checksum)
+
+            data_pacote = f"{flag}|{msg}|{seq + i}"
+            checksum = calculate_checksum(data_pacote)
+            pacote_msg = f"{data_pacote}|{checksum}"
+            
+            print(f">> [CLIENTE] Enviando pacote {num + i + 1}/{total_pacotes} (SEQ={seq + i})")
             sock.send(pacote_msg.encode('utf-8'))
+            time.sleep(0.01) # Pequeno delay para não sobrecarregar o buffer do servidor
 
         # Espera resposta do servidor após enviar toda a janela
         try:
             sock.settimeout(RETRANSMISSION_TIMEOUT)
             resposta = sock.recv(1024).decode('utf-8')
-            print(f">> [CLIENTE] Resposta do servidor: {resposta}")
+            print(f"\n>> [CLIENTE] Resposta do servidor: {resposta}")
 
-            if "ACK" in resposta and "NACK" not in resposta:
+            # Verifica o checksum da resposta
+            is_valid, data_ack = verify_checksum(resposta)
+            if not is_valid:
+                print(">> [CLIENTE] Checksum do ACK/NACK inválido — retransmitindo janela atual...")
+                continue
+                
+            ack_parts = data_ack.split(':')
+            if data_ack.startswith("ACK") and int(ack_parts[1]) >= seq + len(janela):
+                # Sucesso, desliza a janela
+                print(">> [CLIENTE] ACK cumulativo recebido. Janela enviada com sucesso.")
                 seq += len(janela)
                 num += tamanho_janela
             else:
-                print(">> [CLIENTE] NACK recebido — retransmitindo janela atual...")
-                # retransmite a mesma janela
+                # NACK ou ACK fora da ordem
+                print(">> [CLIENTE] NACK recebido ou ACK inesperado — retransmitindo janela atual...")
+                # retransmite a mesma janela (não incrementa 'num' ou 'seq')
                 continue
 
         except socket.timeout:
-            print("\n>> [CLIENTE] TIMEOUT — retransmitindo janela atual...")
-            # retransmite a mesma janela (sem avançar)
+            print(f"\n>> [CLIENTE] TIMEOUT (esperando ACK para base {seq}) — retransmitindo janela atual...")
+            # retransmite a mesma janela (não incrementa 'num' ou 'seq')
             continue
 
     print("\n>> [CLIENTE] Todos os pacotes foram enviados com sucesso!")
     return seq
 
 
-'''crie uma função que faça o seguinte:
-- receber como parametro: tamanho maximo de caracteres por janela e a mensagem a ser enviada
-- dividir a mensagem em partes de acordo com o tamanho maximo de caracteres por janela
-- retornar uma lista com as partes da mensagem dividida'''
 def dividir_mensagem(tamanho_maximo, mensagem):
     partes = []
+    if not mensagem: # Garante que envia pelo menos um pacote se a msg for vazia
+        return [""]
     for i in range(0, len(mensagem), tamanho_maximo):
         partes.append(mensagem[i:i + tamanho_maximo])
     return partes
@@ -136,9 +196,8 @@ def dividir_mensagem(tamanho_maximo, mensagem):
 def main():
 
     try:
-        # metodo socket : cria um objeto socket TCP
+        # cria um objeto socket TCP
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # método conect : cria uma conexão entre o servidor e o cliente no lado do cliente . Nesse caso uma conexão está sendo aberta na porta
         sock.connect(('localhost', 1500))
         
     except ConnectionRefusedError as error:
@@ -150,37 +209,36 @@ def main():
             # Realiza o handshake com o servidor
             handshake(sock)
 
+            seq = random.randint(0, 255) # Inicia o número de sequência
 
             while True:
-                #Troca de mensagem com o Servidor
-                seq = random.randint(0, 255)
-
-                #recebendo tamanho de pacotes por janela do servidor, o cliente que definirá a janela comum input
-                qnt_pacotes = int(input("\n>> [CLIENTE] Defina o tamanho da janela (número de pacotes por janela): "))
-
-                #o  cliente define a qnt de caracteres enviados por pacotes
-                tamanho_caracteres = int(input("\n>> [CLIENTE] Defina o tamanho máximo de caracteres por pacote: "))
+                # 1. Configuração da Janela
+                qnt_pacotes = int(input("\n>> [CLIENTE] Defina o tamanho da janela (pacotes por rajada): "))
+                tamanho_caracteres = int(input(">> [CLIENTE] Defina o tamanho máximo de caracteres por pacote: "))
                 
-                if qnt_pacotes == 0:
-                    print("Tamanho da janela é 0, esperando atualização...")
+                if qnt_pacotes <= 0 or tamanho_caracteres <= 0:
+                    print("Valores devem ser maiores que 0.")
                     continue
 
-                if tamanho_caracteres == 0:
-                    print("Tamanho máximo de caracteres por janela é 0, esperando atualização...")
-                    continue
+                # 2. Informa ao servidor a configuração
+                # O servidor precisa saber quantos pacotes esperar!
+                config_msg = f"{qnt_pacotes}"
+                print(f">> [CLIENTE] Enviando configuração da janela para o servidor: {config_msg} pacotes")
+                sock.send(config_msg.encode('utf-8'))
 
-                # Lendo mensagem do usuário
+                # 3. Lendo e Segmentando a Mensagem
                 message = input(f"\nDigite sua mensagem: ")
                 pacotes = dividir_mensagem(tamanho_caracteres, message)
-                print(f">> [CLIENTE] Pacotes divididos: {pacotes}")
+                print(f">> [CLIENTE] Mensagem dividida em {len(pacotes)} pacotes.")
 
-                # Envia a mensagem em janelas Go-Back-N
+                # 4. Envia a mensagem em janelas Go-Back-N
                 seq = enviar_janela(sock, pacotes, seq, qnt_pacotes)
 
-                #opção de sair apos a rajada com um input
+                # 5. Opção de sair
                 sair = input("\nDigite 'sair' para encerrar a conexão ou pressione Enter para continuar...")
                 if sair.lower() == 'sair':
                     print("Desconectando do servidor...")
+                    sock.send("SAIR".encode('utf-8')) # Informa ao servidor
                     break
                     
         except Exception as e:
