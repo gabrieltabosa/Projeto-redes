@@ -50,6 +50,15 @@ def verify_checksum(full_packet: str) -> (bool, str):
 # LÓGICA DO PROTOCOLO (Handshake e Comunicação GBN)
 # ==============================================================================
 
+def enviar_ack_sr(sock_client, seq_num):
+    """
+    Envia um ACK individual para o protocolo Selective Repeat.
+    """
+    resposta = f"ACK-SR:{seq_num}"
+    checksum_resp = calculate_checksum(resposta)
+    resposta_full = f"{resposta}|{checksum_resp}\n"
+    sock_client.send(resposta_full.encode('utf-8'))
+
 def process_handshake(sock_client):
     print_titulo("AGUARDANDO HANDSHAKE DO CLIENTE")
 
@@ -118,17 +127,17 @@ def process_handshake(sock_client):
 
 
 # --- LÓGICA REESCRITA DO SERVIDOR GO-BACK-N ---
-def comunicacao_cliente(sock_client):
+# --- LÓGICA REESCRITA DO SERVIDOR (AGORA UM ROTEADOR) ---
+# --- LÓGICA DO SERVIDOR (AGORA UM ROTEADOR) ---
+def comunicacao_cliente(sock_client, modo): # <--- Aceita 'modo'
 
-    rec_seq = None # Número de sequência esperado
-    
     # Loop Externo (por Mensagem)
     while True:
         try:
             sock_client.settimeout(INACTIVITY_TIMEOUT)
             
-            # 1. Espera a configuração (Janela|Total) ou SAIR
-            print("\n>> [SERVIDOR] Aguardando configuração de mensagem do cliente (Janela|Total)...")
+            # 1. Espera a configuração (Janela|Total|SeqInicial) ou SAIR
+            print("\n>> [SERVIDOR] Aguardando configuração de mensagem do cliente...")
             config_data = sock_client.recv(1024).decode('utf-8')
             
             if not config_data:
@@ -139,100 +148,117 @@ def comunicacao_cliente(sock_client):
                 print(">> [SERVIDOR] Cliente solicitou encerramento.")
                 break
 
+            # Processa a configuração
             try:
-                qnt_pacotes_janela, total_pacotes_msg = map(int, config_data.split('|'))
-            except ValueError:
+                parts = config_data.split('|')
+                qnt_pacotes_janela = int(parts[0])
+                total_pacotes_msg = int(parts[1])
+            except (ValueError, IndexError):
                 print(f">> [SERVIDOR] ERRO: Configuração inválida recebida: {config_data}")
                 continue
                 
-            print(f">> [SERVIDOR] Config recebida: Tamanho Janela={qnt_pacotes_janela}, Total de Pacotes={total_pacotes_msg}")
+            print(f">> [SERVIDOR] Config recebida: Janela={qnt_pacotes_janela}, Total={total_pacotes_msg}")
             
-            pacotes_recebidos_total = 0
-            mensagem_completa = ""
+            # ==========================================================
+            # ROTEADOR DE PROTOCOLO (GBN ou SR)
+            # ==========================================================
             
-            # Loop Interno (por Janela, até completar a Mensagem)
-            while pacotes_recebidos_total < total_pacotes_msg:
+            if modo == "GoBackN":
+                print_titulo("MODO GO-BACK-N ATIVADO")
                 
-                # Calcula quantos pacotes esperar *nesta* janela
-                qnt_esperada_janela = min(qnt_pacotes_janela, total_pacotes_msg - pacotes_recebidos_total)
-                print(f"\n>> [SERVIDOR] Aguardando janela... (Esperando {qnt_esperada_janela} pacotes de {total_pacotes_msg} total)")
+                # Variáveis de estado do GBN
+                rec_seq = None 
+                pacotes_recebidos_total = 0
+                mensagem_completa = ""
                 
-                pacotes_descartados = False
-                
-                # Loop de recebimento da Janela
-                for i in range(qnt_esperada_janela):
-                    data_full = sock_client.recv(1024).decode('utf-8')
+                # Loop Interno (por Janela, até completar a Mensagem) - LÓGICA GBN
+                while pacotes_recebidos_total < total_pacotes_msg:
                     
-                    if not data_full:
-                        print(">> [SERVIDOR] Cliente desconectou no meio da janela.")
-                        pacotes_descartados = True
-                        break # Sai do loop 'for'
-
-                    # Se já encontramos um erro (GBN), descartamos o resto da janela
-                    if pacotes_descartados:
-                        print(f">> [SERVIDOR] (Descartando pacote {i+1} da janela - base já corrompida)")
-                        continue
-
-                    # Verifica Checksum
-                    is_valid, data_part = verify_checksum(data_full)
-                    if not is_valid:
-                        print(f">> [SERVIDOR] ERRO: Checksum inválido. Descartando pacote {i+1} e o resto da janela.")
-                        pacotes_descartados = True
-                        continue # Começa a descartar
-
-                    # Processa o pacote válido
-                    try:
-                        parts = data_part.split('|')
-                        flag = parts[0]
-                        msg_data = parts[1]
-                        seq_recebido = int(parts[2])
-                    except (IndexError, ValueError):
-                        print(f">> [SERVIDOR] ERRO: Pacote malformado. {data_part}")
-                        pacotes_descartados = True
-                        continue
+                    qnt_esperada_janela = min(qnt_pacotes_janela, total_pacotes_msg - pacotes_recebidos_total)
+                    print(f"\n>> [GBN-SERV] Aguardando janela... (Esperando {qnt_esperada_janela} pacotes de {total_pacotes_msg} total)")
+                    
+                    pacotes_descartados = False
+                    data_full = "" 
+                    
+                    # Loop de recebimento da Janela
+                    for i in range(qnt_esperada_janela):
+                        data_full = sock_client.recv(1024).decode('utf-8')
                         
-                    # Inicializa o número de sequência esperado no primeiro pacote
-                    if rec_seq is None:
-                        rec_seq = seq_recebido
+                        if not data_full:
+                            print(">> [GBN-SERV] Cliente desconectou no meio da janela.")
+                            pacotes_descartados = True
+                            break 
 
-                    # Verifica a ordem (Lógica GBN)
-                    if flag == "MSG" and seq_recebido == rec_seq:
-                        # Pacote esperado! Aceita.
-                        print(f">> [SERVIDOR] Pacote {i+1} (SEQ={seq_recebido}) recebido com sucesso.")
-                        mensagem_completa += msg_data
-                        rec_seq += 1 # Incrementa o número de sequência esperado
+                        if pacotes_descartados:
+                            print(f">> [GBN-SERV] (Descartando pacote {i+1} da janela - base já corrompida)")
+                            continue
+
+                        is_valid, data_part = verify_checksum(data_full)
+                        if not is_valid:
+                            print(f">> [GBN-SERV] ERRO: Checksum inválido. Descartando pacote {i+1} e o resto da janela.")
+                            pacotes_descartados = True
+                            continue 
+
+                        try:
+                            parts_data = data_part.split('|')
+                            flag = parts_data[0]
+                            msg_data = parts_data[1]
+                            seq_recebido = int(parts_data[2])
+                        except (IndexError, ValueError):
+                            print(f">> [GBN-SERV] ERRO: Pacote malformado. {data_part}")
+                            pacotes_descartados = True
+                            continue
+                            
+                        if rec_seq is None:
+                            rec_seq = seq_recebido
+
+                        if flag == "MSG" and seq_recebido == rec_seq:
+                            print(f">> [GBN-SERV] Pacote {i+1} (SEQ={seq_recebido}) recebido com sucesso.")
+                            mensagem_completa += msg_data
+                            rec_seq += 1 
+                        else:
+                            print(f">> [GBN-SERV] ERRO: Pacote inesperado (Flag:{flag}, Esperado_SEQ:{rec_seq}, Recebido_SEQ:{seq_recebido})")
+                            print(f">> [GBN-SERV] Descartando pacote {i+1} e o resto da janela.")
+                            pacotes_descartados = True
+                            continue 
+
+                    # Fim do loop 'for' (fim da janela GBN)
+                    if not data_full and pacotes_descartados:
+                        break
+                    
+                    ack_response = rec_seq if rec_seq is not None else 0
+
+                    if pacotes_descartados:
+                        resposta = f"NACK:{ack_response}"
+                        print(f">> [GBN-SERV] Janela falhou. Enviando NACK para {ack_response}.")
                     else:
-                        # Pacote fora de ordem, duplicado ou corrompido (flag != MSG)
-                        print(f">> [SERVIDOR] ERRO: Pacote inesperado (Flag:{flag}, Esperado_SEQ:{rec_seq}, Recebido_SEQ:{seq_recebido})")
-                        print(f">> [SERVIDOR] Descartando pacote {i+1} e o resto da janela.")
-                        pacotes_descartados = True
-                        continue # Começa a descartar
+                        resposta = f"ACK:{ack_response}"
+                        print(f">> [GBN-SERV] Janela recebida com sucesso. Enviando ACK cumulativo: {ack_response}.")
+                        pacotes_recebidos_total += qnt_esperada_janela
+                    
+                    checksum_resp = calculate_checksum(resposta)
+                    resposta_full = f"{resposta}|{checksum_resp}"
+                    sock_client.send(resposta_full.encode('utf-8'))
 
-                # Fim do loop 'for' (fim da janela)
-                
-                # Se o cliente desconectou no meio da janela, saia também do loop da mensagem
-                if not data_full and pacotes_descartados:
-                    break
-                
-                # 3. Envia resposta CUMULATIVA (ACK ou NACK)
-                ack_response = rec_seq if rec_seq is not None else 0 # O ACK é sempre o *próximo* esperado
+                # Fim do loop 'while' (fim da mensagem GBN)
+                if pacotes_recebidos_total == total_pacotes_msg:
+                    print(f"\n>> [SERVIDOR] Mensagem completa (GBN) recebida: '{mensagem_completa}'")
 
-                if pacotes_descartados:
-                    resposta = f"NACK:{ack_response}"
-                    print(f">> [SERVIDOR] Janela falhou. Enviando NACK para {ack_response}.")
-                else:
-                    resposta = f"ACK:{ack_response}"
-                    print(f">> [SERVIDOR] Janela recebida com sucesso. Enviando ACK cumulativo: {ack_response}.")
-                    pacotes_recebidos_total += qnt_esperada_janela # Avança o total de pacotes da MENSAGEM
+            elif modo == "RepetiçãoSeletiva":
+                print_titulo("MODO REPETIÇÃO SELETIVA ATIVADO")
+                try:
+                    # Pega o SEQ inicial da configuração (parts[2])
+                    rec_seq_inicial = int(parts[2]) 
+                    print(f">> [SR-SERV] Base de sequência inicial esperada: {rec_seq_inicial}")
+                except (ValueError, IndexError):
+                    print(f">> [SERVIDOR] ERRO: Config SR não incluiu SEQ inicial. {config_data}")
+                    continue # Volta ao loop de esperar config
                 
-                # Adiciona checksum à resposta
-                checksum_resp = calculate_checksum(resposta)
-                resposta_full = f"{resposta}|{checksum_resp}"
-                sock_client.send(resposta_full.encode('utf-8'))
-
-            # Fim do loop 'while' (fim da mensagem)
-            if pacotes_recebidos_total == total_pacotes_msg:
-                print(f"\n>> [SERVIDOR] Mensagem completa recebida: '{mensagem_completa}'")
+                # Chama a função SR (ela agora faz todo o trabalho)
+                comunicacao_cliente_sr(sock_client, 
+                                       qnt_pacotes_janela, 
+                                       total_pacotes_msg, 
+                                       rec_seq_inicial)
 
         except socket.timeout:
             print(f"\n>> [SERVIDOR] ERRO: Cliente inativo por {INACTIVITY_TIMEOUT}s. Encerrando.")
@@ -242,6 +268,102 @@ def comunicacao_cliente(sock_client):
             break
 
     print(">> [SERVIDOR] Cliente desconectado!")
+
+# --- LÓGICA DO SERVIDOR SELECTIVE REPEAT ---
+def comunicacao_cliente_sr(sock_client, qnt_pacotes_janela, total_pacotes_msg, rec_seq_inicial):
+    
+    print(f"\n>> [SR-SERV] Aguardando {total_pacotes_msg} pacotes (Janela={qnt_pacotes_janela}, Base={rec_seq_inicial})")
+    
+    rec_seq = rec_seq_inicial         # O próximo pacote esperado (base da janela)
+    pacotes_recebidos_total = 0 # Contador de pacotes entregues à aplicação
+    mensagem_completa = ""
+    
+    # Buffer para pacotes fora de ordem (mas dentro da janela)
+    buffer_recebimento = {} # Formato: {seq_num: data}
+
+    while pacotes_recebidos_total < total_pacotes_msg:
+        try:
+            sock_client.settimeout(INACTIVITY_TIMEOUT)
+            data_full = sock_client.recv(1024).decode('utf-8')
+            
+            if not data_full:
+                print(">> [SR-SERV] Cliente desconectou inesperadamente.")
+                return False
+
+            # Verifica Checksum
+            is_valid, data_part = verify_checksum(data_full)
+            if not is_valid:
+                print(f">> [SR-SERV] ERRO: Checksum inválido. Descartando pacote (Descarte Passivo).")
+                continue # SR: Apenas descarta, não afeta os outros
+
+            # Processa o pacote válido
+            try:
+                parts = data_part.split('|')
+                flag = parts[0]
+                msg_data = parts[1]
+                seq_recebido = int(parts[2])
+            except (IndexError, ValueError):
+                print(f">> [SR-SERV] ERRO: Pacote malformado. {data_part}")
+                continue
+
+            if flag != "MSG":
+                print(f">> [SR-SERV] Pacote não é MSG, ignorando: {flag}")
+                continue
+
+            # --- LÓGICA CENTRAL SR ---
+
+            # 1. Pacote já foi recebido e entregue (ACK pode ter sido perdido)
+            if seq_recebido < rec_seq:
+                print(f">> [SR-SERV] Pacote duplicado (SEQ={seq_recebido}) recebido. Reenviando ACK.")
+                enviar_ack_sr(sock_client, seq_recebido)
+                continue
+
+            # 2. Pacote está DENTRO da janela de recebimento
+            if rec_seq <= seq_recebido < (rec_seq + qnt_pacotes_janela):
+                
+                print(f">> [SR-SERV] Pacote (SEQ={seq_recebido}) recebido. Enviando ACK-SR.")
+                enviar_ack_sr(sock_client, seq_recebido) # Envia ACK individual
+                
+                # 2a. É o pacote esperado!
+                if seq_recebido == rec_seq:
+                    print(f">> [SR-SERV] Pacote {seq_recebido} (base) aceito.")
+                    mensagem_completa += msg_data
+                    pacotes_recebidos_total += 1
+                    rec_seq += 1 # Desliza a base
+
+                    # Agora, verifica o buffer para entregar pacotes contíguos
+                    while rec_seq in buffer_recebimento:
+                        print(f">> [SR-SERV] Entregando pacote {rec_seq} do buffer.")
+                        data_buffer = buffer_recebimento.pop(rec_seq)
+                        mensagem_completa += data_buffer
+                        pacotes_recebidos_total += 1
+                        rec_seq += 1 # Desliza a base novamente
+                    
+                    print(f">> [SR-SERV] Nova base: {rec_seq}")
+
+                # 2b. É fora de ordem, mas na janela. Bufferiza.
+                else:
+                    if seq_recebido not in buffer_recebimento:
+                        print(f">> [SR-SERV] Pacote {seq_recebido} (fora de ordem) bufferizado.")
+                        buffer_recebimento[seq_recebido] = msg_data
+                    else:
+                        print(f">> [SR-SERV] Pacote {seq_recebido} (bufferizado) duplicado. ACK reenviado.")
+
+            # 3. Pacote fora da janela (muito adiantado)
+            else:
+                print(f">> [SR-SERV] ERRO: Pacote {seq_recebido} fora da janela (Base={rec_seq}, Janela={qnt_pacotes_janela}). Descartado.")
+                # Nota: Não enviamos NACK, apenas ignoramos.
+                # O cliente vai estourar o timer eventualmente se o pacote foi perdido.
+
+        except socket.timeout:
+            print(f"\n>> [SR-SERV] ERRO: Cliente inativo por {INACTIVITY_TIMEOUT}s. Encerrando.")
+            return False
+        except Exception as e:
+            print(f"\n>> [SR-SERV] ERRO na comunicação: {e}. Encerrando conexão.")
+            return False
+
+    print(f"\n>> [SERVIDOR] Mensagem completa (SR) recebida: '{mensagem_completa}'")
+    return True
 
 
 def main():
@@ -258,13 +380,13 @@ def main():
         sock_client, endereco = sock.accept()
         
         #Realiza o handshake
-        modo, tam_max = process_handshake(sock_client)
+        modo, tam_max = process_handshake(sock_client) # <--- 'modo' já é retornado aqui
         print(f">> [SERVIDOR] Cliente de endereço: {endereco}, conectado!")
 
         if modo and tam_max:
             print(f">> [SERVIDOR] Modo de operação: {modo}, Tamanho máximo de pacote: {tam_max}")
-            #Inicia a troca de mensagens (agora com lógica GBN)
-            comunicacao_cliente(sock_client)
+            #Inicia a troca de mensagens
+            comunicacao_cliente(sock_client, modo)  
 
         sock_client.close()
 

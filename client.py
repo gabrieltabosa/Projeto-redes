@@ -104,6 +104,7 @@ def handshake(sock):
         
         sock.send(mensagem_ack.encode('utf-8'))
         print_titulo("HANDSHAKE COM O SERVIDOR ESTABELECIDO")
+        return modo
     else:
         print_titulo("ERRO NO HANDSHAKE")
         raise Exception("Falha no Handshake")
@@ -183,6 +184,111 @@ def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela):
     print("\n>> [CLIENTE] Todos os pacotes da mensagem foram enviados com sucesso!")
     return seq_base # Retorna o novo número de sequência para a próxima mensagem
 
+# ==============================================================================
+# LÓGICA DE ENVIO (SELECTIVE REPEAT)
+# ==============================================================================
+def enviar_janela_sr(sock, pacotes, seq_inicial, tamanho_janela):
+    
+    seq_base = seq_inicial
+    proximo_seq = seq_inicial
+    total_pacotes_msg = len(pacotes)
+    total_enviados = 0 # Conta pacotes confirmados (ACKados)
+    
+    pacotes_enviados_pendentes = {} 
+    pacotes_ackados = set() 
+    buffer_ack = "" # <--- NOVO BUFFER DE ACK
+
+    print(f"\n>> [SR-CLIENTE] Iniciando envio SR. Base={seq_base}, Total={total_pacotes_msg}, Janela={tamanho_janela}")
+
+    while total_enviados < total_pacotes_msg:
+        
+        # 1. Envia pacotes novos até o limite da janela
+        while proximo_seq < (seq_base + tamanho_janela) and proximo_seq < (seq_inicial + total_pacotes_msg):
+            
+            idx = proximo_seq - seq_inicial
+            msg = pacotes[idx]
+            data_pacote = f"MSG|{msg}|{proximo_seq}"
+            checksum = calculate_checksum(data_pacote)
+            pacote_msg = f"{data_pacote}|{checksum}"
+
+            pacotes_enviados_pendentes[proximo_seq] = pacote_msg 
+            
+            print(f">> [SR-CLIENTE] Enviando pacote {idx + 1}/{total_pacotes_msg} (SEQ={proximo_seq})")
+            sock.send(pacote_msg.encode('utf-8'))
+            time.sleep(0.01)
+            
+            proximo_seq += 1
+
+        # 2. Espera por ACKs (com timeout focado na 'base')
+        try:
+            sock.settimeout(RETRANSMISSION_TIMEOUT)
+            resposta = sock.recv(1024).decode('utf-8')
+            buffer_ack += resposta # Adiciona dados recebidos ao buffer
+            
+            # Processa TODOS os pacotes completos no buffer (separados por \n)
+            while '\n' in buffer_ack:
+                pacote_ack_full, buffer_ack = buffer_ack.split('\n', 1)
+                
+                if not pacote_ack_full: # Ignora linhas vazias
+                    continue
+
+                is_valid, data_ack = verify_checksum(pacote_ack_full)
+                if not is_valid:
+                    print(f">> [SR-CLIENTE] Checksum do ACK inválido, descartando: {pacote_ack_full}")
+                    continue
+
+                # O Servidor SR envia ACKs individuais "ACK-SR:N"
+                if data_ack.startswith("ACK-SR:"):
+                    ack_num = int(data_ack.split(':')[1])
+                    print(f">> [SR-CLIENTE] Recebido ACK-SR para {ack_num}")
+
+                    # Se o ACK for para um pacote que ainda está pendente...
+                    if ack_num in pacotes_enviados_pendentes:
+                        pacotes_enviados_pendentes.pop(ack_num) # Remove dos pendentes
+                        pacotes_ackados.add(ack_num)       # Adiciona aos ACKados
+                        total_enviados += 1                # Incrementa o total
+                        
+                    # 3. Desliza a janela (a 'base')
+                    # Se o ACK recebido for o da base, desliza a janela
+                    # (Também desliza se a base já foi ACKada por um ACK fora de ordem)
+                    while seq_base in pacotes_ackados:
+                        if seq_base == ack_num:
+                             print(f">> [SR-CLIENTE] ACK da base ({seq_base}) recebido.")
+                        else:
+                             print(f">> [SR-CLIENTE] Base ({seq_base}) já estava ACKada. Deslizando...")
+                        
+                        pacotes_ackados.remove(seq_base)
+                        seq_base += 1
+                    
+                    print(f">> [SR-CLIENTE] Janela deslizou. Nova base: {seq_base}")
+                    
+                else:
+                    print(f">> [SR-CLIENTE] Resposta inesperada do servidor: {data_ack}")
+
+        except socket.timeout:
+            # 4. Timeout! Retransmite APENAS o pacote 'base'
+            print(f"\n>> [SR-CLIENTE] TIMEOUT (esperando ACK para base {seq_base})")
+            
+            if seq_base in pacotes_enviados_pendentes:
+                print(f">> [SR-CLIENTE] Retransmitindo pacote {seq_base}...")
+                pacote_retransmitir = pacotes_enviados_pendentes[seq_base]
+                sock.send(pacote_retransmitir.encode('utf-8'))
+            else:
+                # Se a base não está pendente, significa que o ACK dela foi recebido,
+                # mas o loop 'while seq_base in pacotes_ackados' já a limpou.
+                # O timeout foi, na verdade, para o *próximo* pacote (seq_base atual).
+                if (seq_base - seq_inicial) < total_pacotes_msg:
+                    print(f">> [SR-CLIENTE] Base {seq_base} não está pendente, mas timeout ocorreu.")
+                    # Verifica se o próximo pacote (nova base) precisa ser enviado/reenviado
+                    if seq_base in pacotes_enviados_pendentes:
+                        print(f">> [SR-CLIENTE] Retransmitindo nova base {seq_base}...")
+                        sock.send(pacotes_enviados_pendentes[seq_base].encode('utf-8'))
+                else:
+                    print(f">> [SR-CLIENTE] Timeout, mas todos os pacotes parecem enviados. Estranho.")
+
+
+    print("\n>> [CLIENTE] Todos os pacotes da mensagem foram enviados com sucesso (SR)!")
+    return seq_base # Retorna o novo número de sequência
 
 def dividir_mensagem(tamanho_maximo, mensagem):
     partes = []
@@ -207,7 +313,7 @@ def main():
     else:
         try:
             # Realiza o handshake com o servidor
-            handshake(sock)
+            modo = handshake(sock)
 
             seq = random.randint(0, 255) # Inicia o número de sequência
 
@@ -227,16 +333,21 @@ def main():
             print(f">> [CLIENTE] Mensagem dividida em {len(pacotes)} pacotes.")
 
             # 3. Informa ao servidor a configuração (Janela E Total)
-            config_msg = f"{qnt_pacotes}|{len(pacotes)}"
+            config_msg = f"{qnt_pacotes}|{len(pacotes)}| {seq}"
             print(f">> [CLIENTE] Enviando configuração (Janela={qnt_pacotes}, Total={len(pacotes)})")
             sock.send(config_msg.encode('utf-8'))
 
-            # 4. Envia a mensagem em janelas Go-Back-N
-            seq = enviar_janela(sock, pacotes, seq, qnt_pacotes)
+            # Linhas Novas:
+        # 4. Chama a função de envio correta baseada no modo
+            if modo == "GoBackN":
+                print_titulo("INICIANDO TRANSFERÊNCIA (MODO GO-BACK-N)")
+                seq = enviar_janela(sock, pacotes, seq, qnt_pacotes)
+            elif modo == "RepetiçãoSeletiva":
+                print_titulo("INICIANDO TRANSFERÊNCIA (MODO REPETIÇÃO SELETIVA)")
+                seq = enviar_janela_sr(sock, pacotes, seq, qnt_pacotes)
 
-            # 5. Encerra automaticamente
-            print("\n>> [CLIENTE] Mensagem enviada com sucesso. Desconectando...")
-            sock.send("SAIR".encode('utf-8')) # Informa ao servidor que terminamos
+        # 5. Encerra automaticamente
+            print(f"\n>> [CLIENTE] Mensagem (Modo: {modo}) enviada com sucesso. Desconectando...")
                     
         except Exception as e:
             print(f"\n>> [CLIENTE] Erro na comunicação: {e}")
