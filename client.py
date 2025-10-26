@@ -122,31 +122,12 @@ def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela):
         
         print(f"\n>> [CLIENTE] Enviando janela (Pacotes {idx_inicio+1} a {idx_fim} de {total_pacotes})... (Base: {seq_base})")
 
-        # --- LÓGICA DE SIMULAÇÃO DE FALHA ---
-        tipo_falha = "NENHUMA"
-        if random.randint(1, 3) == 1: # 33% de chance de falha na janela
-            tipo_falha = random.choice(["PERDA", "CORRUPCAO"])
-            
-        pacote_com_falha = -1
-        if tipo_falha != "NENHUMA":
-            pacote_com_falha = random.randint(0, len(janela) - 1)
-            print(f">> [CLIENTE] (SIMULANDO FALHA: {tipo_falha} no pacote {idx_inicio + pacote_com_falha + 1})")
-        # --- FIM DA SIMULAÇÃO ---
             
         # Envia todos os pacotes da janela (pipelining)
         for i, msg in enumerate(janela):
             flag = "MSG"
             seq_atual = seq_base + i
-            
-            # Aplica a falha, se houver
-            if i == pacote_com_falha:
-                if tipo_falha == "PERDA":
-                    print(f">> [CLIENTE] (Pulando envio do pacote {idx_inicio + i + 1}...)")
-                    continue # Simplesmente não envia o pacote
-                elif tipo_falha == "CORRUPCAO":
-                    # Enviamos com flag "PERDA" para simular corrupção
-                    flag = "PERDA" 
-
+        
             data_pacote = f"{flag}|{msg}|{seq_atual}"
             checksum = calculate_checksum(data_pacote)
             pacote_msg = f"{data_pacote}|{checksum}"
