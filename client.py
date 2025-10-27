@@ -184,9 +184,7 @@ def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela):
     print("\n>> [CLIENTE] Todos os pacotes da mensagem foram enviados com sucesso!")
     return seq_base # Retorna o novo número de sequência para a próxima mensagem
 
-# ==============================================================================
-# LÓGICA DE ENVIO (SELECTIVE REPEAT)
-# ==============================================================================
+
 def enviar_janela_sr(sock, pacotes, seq_inicial, tamanho_janela):
     
     seq_base = seq_inicial
@@ -326,6 +324,12 @@ def main():
             if qnt_pacotes <= 0 or tamanho_caracteres <= 0:
                 print("Valores devem ser maiores que 0.")
                 raise Exception("Valores de janela ou pacote inválidos.")
+            elif qnt_pacotes > 5:
+                print("Valores da janela deve ser menor que 5.")
+                raise Exception("Valores de janela invalido")
+            elif tamanho_caracteres > 4:
+                print("Valor da quatntidade de caracteres deve ser menor que 4.")
+                raise Exception("Valores de janela caracteres invalido")
 
             # 2. Lendo e Segmentando a Mensagem
             message = input(f"\nDigite sua mensagem: ")
