@@ -1,0 +1,40 @@
+# no exercicio de petronio era para desempacotarmos pacotes com o maximo de 4 caracteres por pacote . Para termos o maior número possivel de caracteres por pacote fiz essa lógica aqui .
+
+  mensagem = input()
+
+tamanho_da_mensagem = len(mensagem)
+
+
+def empacotamento(tamanho_da_mensagem, mensagem):
+    pacotes = []
+    if tamanho_da_mensagem % 4 == 0:
+
+        # Itera sobre a mensagem de 2 em 2 caracteres
+        for i in range(0, tamanho_da_mensagem, 4):
+            pacotes.append(mensagem[i:i+4])
+    else:
+        if tamanho_da_mensagem % 3 == 0:
+            # Itera sobre a mensagem de 3 em 3 caracteres
+            for i in range(0, tamanho_da_mensagem, 3):
+                pacotes.append(mensagem[i:i+3])
+        else:
+            if tamanho_da_mensagem % 2 == 0:
+            # Itera sobre a mensagem de 2 em 2 caracteres
+                for i in range(0, tamanho_da_mensagem, 2):
+                    pacotes.append(mensagem[i:i+2])
+            else:
+            # Caso não for divisivel por nenhum desses numeros vamos subtrair a um o tamanho da mensagem , chamar de novo essa função 
+                tamanho_da_mensagem = tamanho_da_mensagem - 1
+                pacotes = empacotamento(tamanho_da_mensagem, mensagem)
+            # claro , não vamos deixar o ultimo elemento de fora . 
+                pacotes.append(mensagem[-1])
+
+    return pacotes
+
+
+pacotes = empacotamento(tamanho_da_mensagem, mensagem)
+
+for pacote in pacotes : 
+      print(pacote , end = " " ) 
+
+print(pacotes, end=" ")
