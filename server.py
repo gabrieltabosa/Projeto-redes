@@ -126,8 +126,6 @@ def process_handshake(sock_client):
         return None, None
 
 
-# --- LÓGICA REESCRITA DO SERVIDOR GO-BACK-N ---
-# --- LÓGICA REESCRITA DO SERVIDOR (AGORA UM ROTEADOR) ---
 # --- LÓGICA DO SERVIDOR (AGORA UM ROTEADOR) ---
 def comunicacao_cliente(sock_client, modo): # <--- Aceita 'modo'
 
@@ -182,10 +180,18 @@ def comunicacao_cliente(sock_client, modo): # <--- Aceita 'modo'
                     
                     # Loop de recebimento da Janela
                     for i in range(qnt_esperada_janela):
-                        data_full = sock_client.recv(1024).decode('utf-8')
-                        
+                        # Este recv pode falhar se o cliente não enviar o pacote (simulação de perda)
+                        try:
+                            data_full = sock_client.recv(1024).decode('utf-8')
+                        except socket.timeout:
+                            # Se um pacote não chegar, o próximo recv estoura.
+                            # No GBN, estourar o timer *no cliente* é o que inicia a retransmissão,
+                            # mas aqui estamos esperando ativamente. Se o cliente parou de enviar,
+                            # tratamos como desconexão.
+                            data_full = ""
+
                         if not data_full:
-                            print(">> [GBN-SERV] Cliente desconectou no meio da janela.")
+                            print(">> [GBN-SERV] Cliente desconectou/parou de enviar no meio da janela.")
                             pacotes_descartados = True
                             break 
 
@@ -217,6 +223,7 @@ def comunicacao_cliente(sock_client, modo): # <--- Aceita 'modo'
                             mensagem_completa += msg_data
                             rec_seq += 1 
                         else:
+                            # Pacote fora de ordem (GBN!), ou seja, o pacote rec_seq foi perdido/corrompido.
                             print(f">> [GBN-SERV] ERRO: Pacote inesperado (Flag:{flag}, Esperado_SEQ:{rec_seq}, Recebido_SEQ:{seq_recebido})")
                             print(f">> [GBN-SERV] Descartando pacote {i+1} e o resto da janela.")
                             pacotes_descartados = True
@@ -229,9 +236,11 @@ def comunicacao_cliente(sock_client, modo): # <--- Aceita 'modo'
                     ack_response = rec_seq if rec_seq is not None else 0
 
                     if pacotes_descartados:
+                        # Envia NACK:N, onde N é o pacote que *esperamos* (rec_seq)
                         resposta = f"NACK:{ack_response}"
                         print(f">> [GBN-SERV] Janela falhou. Enviando NACK para {ack_response}.")
                     else:
+                        # Envia ACK:N, onde N é o próximo pacote *esperado* (rec_seq)
                         resposta = f"ACK:{ack_response}"
                         print(f">> [GBN-SERV] Janela recebida com sucesso. Enviando ACK cumulativo: {ack_response}.")
                         pacotes_recebidos_total += qnt_esperada_janela
@@ -274,7 +283,7 @@ def comunicacao_cliente_sr(sock_client, qnt_pacotes_janela, total_pacotes_msg, r
     
     print(f"\n>> [SR-SERV] Aguardando {total_pacotes_msg} pacotes (Janela={qnt_pacotes_janela}, Base={rec_seq_inicial})")
     
-    rec_seq = rec_seq_inicial         # O próximo pacote esperado (base da janela)
+    rec_seq = rec_seq_inicial      # O próximo pacote esperado (base da janela)
     pacotes_recebidos_total = 0 # Contador de pacotes entregues à aplicação
     mensagem_completa = ""
     
