@@ -68,6 +68,27 @@ def handshake(sock):
         else:
             print("Opção inexistente! Tente novamente\n")
 
+    # Escolhendo Erro a ser Simulado
+    erro_simulado = None # Padrão: nenhum erro
+    while True:
+        selecao = input("\n>> [CLIENTE] Escolha se quer simular erros:\n(1) Sim\n(2) Não\nDigite sua escolha: ")
+        if selecao == "1":
+            erro_escolhido = input("\tSelecione o Erro a ser simulado\n\t(1) Timeout Erro\n\t(2) Pacote Duplicado\n\tdigite sua escolha: ")
+            if erro_escolhido == "1":
+                erro_simulado = "1"
+                print("\tErro de TimeOut escolhido")
+                break
+            elif erro_escolhido == "2":
+                erro_simulado = "2"
+                print("\tErro de Duplicação de Pacotes escolhido")
+                break
+            else:
+                print("\tOpção inválida! Tente novamente")
+        elif selecao == "2":
+            break
+        else:
+            print("Opção inválida! Tente Novamente")
+
     # 1. Enviando SYN ao servidor
     tam_max = "1024"
     print(f"\n>> [CLIENTE] Tamanho pré-definido de mensagem: {tam_max}")
@@ -104,7 +125,7 @@ def handshake(sock):
         
         sock.send(mensagem_ack.encode('utf-8'))
         print_titulo("HANDSHAKE COM O SERVIDOR ESTABELECIDO")
-        return modo
+        return modo, erro_simulado
     else:
         print_titulo("ERRO NO HANDSHAKE")
         raise Exception("Falha no Handshake")
@@ -298,68 +319,102 @@ def dividir_mensagem(tamanho_maximo, mensagem):
 
 
 def main():
-
     try:
-        # cria um objeto socket TCP
+        # cria um objeto socket TCP e conecta ao servidor
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.connect(('localhost', 1500))
-        
+
     except ConnectionRefusedError as error:
         print(f">> [CLIENTE] Aconteceu um erro ao tentar conectar ao servidor: {error}")
         print("Encerrando o programa...")
-        
-    else:
-        try:
-            # Realiza o handshake com o servidor
-            modo = handshake(sock)
+        return
 
-            seq = random.randint(0, 255) # Inicia o número de sequência
+    try:
+        # Realiza o handshake com o servidor (modo e se há erro simulado)
+        modo, erro_simulado = handshake(sock)
 
-            # O cliente agora executa apenas UMA vez e sai
-            
-            # 1. Configuração da Janela
-            qnt_pacotes = int(input("\n>> [CLIENTE] Defina o tamanho da janela (pacotes por rajada): "))
-            tamanho_caracteres = int(input(">> [CLIENTE] Defina o tamanho máximo de caracteres por pacote: "))
-            
-            if qnt_pacotes <= 0 or tamanho_caracteres <= 0:
-                print("Valores devem ser maiores que 0.")
-                raise Exception("Valores de janela ou pacote inválidos.")
-            elif qnt_pacotes > 5:
-                print("Valores da janela deve ser menor que 5.")
-                raise Exception("Valores de janela invalido")
-            elif tamanho_caracteres > 4:
-                print("Valor da quatntidade de caracteres deve ser menor que 4.")
-                raise Exception("Valores de janela caracteres invalido")
+        seq = random.randint(0, 255)  # Inicia o número de sequência
 
-            # 2. Lendo e Segmentando a Mensagem
-            message = input(f"\nDigite sua mensagem: ")
+        # Tamanho de caracteres fixo conforme solicitado
+        tamanho_caracteres = 4
+        print(f"\n>> [CLIENTE] Tamanho máximo de caracteres por pacote fixado em {tamanho_caracteres}.")
+
+        # Se modo for GoBackN, solicita a janela; caso contrário usa 1 por padrão
+        if modo == "GoBackN":
+            while True:
+                try:
+                    qnt_pacotes = int(input("\n>> [CLIENTE] Defina o tamanho da janela (pacotes por rajada): "))
+
+                    if qnt_pacotes <= 0:
+                        print("Valores devem ser maiores que 0.")
+                        continue
+                    if qnt_pacotes > 5:
+                        print("Valor da janela deve ser menor ou igual a 5.")
+                        continue
+
+                    break  # configuração válida
+                except ValueError:
+                    print("Por favor digite um número inteiro válido para a janela.")
+        else:
+            # Para Repetição Seletiva, usamos 1 como valor padrão.
+            qnt_pacotes = 1
+            print(f"\n>> [CLIENTE] Modo recebido: {modo}. Usando janela padrão = {qnt_pacotes} (não solicitada).")
+
+        print("\n>> [CLIENTE] Configuração aceita. Agora você pode enviar várias mensagens.")
+        print(">> Digite 'sair' para encerrar e desconectar.\n")
+
+        # Loop principal de envio de mensagens
+        while True:
+            message = input("Digite sua mensagem (ou 'sair' para encerrar): ")
+            if message.strip().lower() == "sair":
+                print(">> [CLIENTE] Usuário solicitou encerrar. Saindo...")
+                break
+
+            # Segmenta a mensagem em pacotes usando o tamanho fixo
             pacotes = dividir_mensagem(tamanho_caracteres, message)
-            print(f">> [CLIENTE] Mensagem dividida em {len(pacotes)} pacotes.")
+            print(f">> [CLIENTE] Mensagem dividida em {len(pacotes)} pacotes (tamanho por pacote = {tamanho_caracteres}).")
 
-            # 3. Informa ao servidor a configuração (Janela E Total)
+            # Informa ao servidor a configuração (Janela E Total) para essa mensagem
             config_msg = f"{qnt_pacotes}|{len(pacotes)}| {seq}"
             print(f">> [CLIENTE] Enviando configuração (Janela={qnt_pacotes}, Total={len(pacotes)})")
-            sock.send(config_msg.encode('utf-8'))
+            try:
+                sock.send(config_msg.encode('utf-8'))
+            except Exception as e:
+                print(f">> [CLIENTE] Erro ao enviar configuração: {e}")
+                # continua permitindo novas tentativas
+                continue
 
-            # Linhas Novas:
-        # 4. Chama a função de envio correta baseada no modo
-            if modo == "GoBackN":
-                print_titulo("INICIANDO TRANSFERÊNCIA (MODO GO-BACK-N)")
-                seq = enviar_janela(sock, pacotes, seq, qnt_pacotes)
-            elif modo == "RepetiçãoSeletiva":
-                print_titulo("INICIANDO TRANSFERÊNCIA (MODO REPETIÇÃO SELETIVA)")
-                seq = enviar_janela_sr(sock, pacotes, seq, qnt_pacotes)
+            # Chama a função de envio correta baseada no modo
+            try:
+                if modo == "GoBackN":
+                    print_titulo("INICIANDO TRANSFERÊNCIA (MODO GO-BACK-N)")
+                    seq = enviar_janela(sock, pacotes, seq, qnt_pacotes)
+                elif modo == "RepetiçãoSeletiva":
+                    print_titulo("INICIANDO TRANSFERÊNCIA (MODO REPETIÇÃO SELETIVA)")
+                    # enviar_janela_sr pode ou não usar qnt_pacotes; adaptamos para aceitar
+                    seq = enviar_janela_sr(sock, pacotes, seq, qnt_pacotes)
+                else:
+                    print(f">> [CLIENTE] Modo desconhecido recebido do handshake: {modo}")
+                    continue
 
-        # 5. Encerra automaticamente
-            print(f"\n>> [CLIENTE] Mensagem (Modo: {modo}) enviada com sucesso. Desconectando...")
-                    
-        except Exception as e:
-            print(f"\n>> [CLIENTE] Erro na comunicação: {e}")
-            
-        finally:
-            # Fecha a conexão
+                print(f"\n>> [CLIENTE] Mensagem (Modo: {modo}) enviada com sucesso.\n")
+            except Exception as e:
+                print(f"\n>> [CLIENTE] Erro durante a transferência: {e}")
+                # volta ao loop para permitir novas tentativas
+                continue
+
+    except Exception as e:
+        print(f"\n>> [CLIENTE] Erro na comunicação: {e}")
+
+    finally:
+        # Fecha a conexão
+        try:
             sock.close()
-            print(">> [CLIENTE] Conexão fechada.")
+        except Exception:
+            pass
+        print(">> [CLIENTE] Conexão fechada.")
+
+
 
 if __name__ == "__main__":
     main()
