@@ -343,6 +343,7 @@ def dividir_mensagem(tamanho_maximo, mensagem):
 
 
 def main():
+
     try:
         # cria um objeto socket TCP e conecta ao servidor
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
