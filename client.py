@@ -73,7 +73,8 @@ def handshake(sock):
     while True:
         selecao = input("\n>> [CLIENTE] Escolha se quer simular erros:\n(1) Sim\n(2) Não\nDigite sua escolha: ")
         if selecao == "1":
-            erro_escolhido = input("\tSelecione o Erro a ser simulado\n\t(1) Timeout Erro\n\t(2) Pacote Duplicado\n\t(3) Perda de Pacotes\n\tdigite sua escolha: ")
+            # --- MUDANÇA AQUI: Adicionada Opção 4 ---
+            erro_escolhido = input("\tSelecione o Erro a ser simulado\n\t(1) Timeout Erro\n\t(2) Pacote Duplicado\n\t(3) Perda de Pacotes\n\t(4) Pacote Corrompido\n\tdigite sua escolha: ")
             if erro_escolhido == "1":
                 erro_simulado = "1"
                 print("\tErro de TimeOut escolhido")
@@ -86,6 +87,12 @@ def handshake(sock):
                 erro_simulado = "3"
                 print("\tErro de Perda de Pacotes escolhido")
                 break
+            # --- NOVO BLOCO ---
+            elif erro_escolhido == "4":
+                erro_simulado = "4"
+                print("\tErro de Pacote Corrompido escolhido")
+                break
+            # --- FIM DO NOVO BLOCO ---
             else:
                 print("\tOpção inválida! Tente novamente")
         elif selecao == "2":
@@ -161,11 +168,25 @@ def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado):
             checksum = calculate_checksum(data_pacote)
             pacote_msg = f"{data_pacote}|{checksum}"
             
-            if erro_simulado == "3" and random.random() < 0.10: # 10% de chance de perda
+            if erro_simulado == "3" and random.random() < 0.10: # 
                 print(f">> [CLIENTE-ERRO] SIMULANDO PERDA do pacote {idx_inicio + i + 1}/{total_pacotes} (SEQ={seq_atual})... O pacote NÃO será enviado.")
                 time.sleep(0.01) # Simula o tempo que levaria
                 continue
             
+            # --- NOVO BLOCO (baseado no Erro 3) ---
+            elif erro_simulado == "4" and random.random() < 0.10: 
+                # Corrompe os dados, mas envia com o checksum *original*
+                # O servidor vai calcular o checksum de "dadosX" e ver que não bate com o "checksum"
+                dados_corrompidos = data_pacote + "X" 
+                pacote_corrompido = f"{dados_corrompidos}|{checksum}"
+
+                print(f">> [CLIENTE-ERRO] SIMULANDO CORRUPÇÃO do pacote {idx_inicio + i + 1}/{total_pacotes} (SEQ={seq_atual}).")
+                print(f">> [CLIENTE-ERRO]   -> Enviando: {pacote_corrompido}")
+                sock.send(pacote_corrompido.encode('utf-8'))
+                time.sleep(0.01)
+                continue # Pula o envio normal
+            # --- FIM DO NOVO BLOCO ---
+
             print(f">> [CLIENTE] Enviando pacote {idx_inicio + i + 1}/{total_pacotes} (SEQ={seq_atual})")
             sock.send(pacote_msg.encode('utf-8'))
             time.sleep(0.01) # Pequeno delay para não sobrecarregar o buffer do servidor
@@ -248,12 +269,25 @@ def enviar_janela_sr(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado):
 
             pacotes_enviados_pendentes[proximo_seq] = pacote_msg 
             
-            if erro_simulado == "3" and random.random() < 0.10: # 10% de chance de perda
+            if erro_simulado == "3" and random.random() < 0.10: 
                 print(f">> [SR-CLIENTE-ERRO] SIMULANDO PERDA do pacote {idx + 1}/{total_pacotes_msg} (SEQ={proximo_seq})... O pacote NÃO será enviado.")
                 time.sleep(0.01)
                 proximo_seq += 1 # A janela desliza, mas o pacote não é enviado
                 continue
             
+            # --- NOVO BLOCO (baseado no Erro 3) ---
+            elif erro_simulado == "4" and random.random() < 0.10: 
+                dados_corrompidos = data_pacote + "X" 
+                pacote_corrompido = f"{dados_corrompidos}|{checksum}"
+
+                print(f">> [SR-CLIENTE-ERRO] SIMULANDO CORRUPÇÃO do pacote {idx + 1}/{total_pacotes_msg} (SEQ={proximo_seq}).")
+                print(f">> [SR-CLIENTE-ERRO]   -> Enviando: {pacote_corrompido}")
+                sock.send(pacote_corrompido.encode('utf-8'))
+                time.sleep(0.01)
+                proximo_seq += 1 # Envia o corrompido e avança
+                continue # Pula o envio normal
+            # --- FIM DO NOVO BLOCO ---
+                
             print(f">> [SR-CLIENTE] Enviando pacote {idx + 1}/{total_pacotes_msg} (SEQ={proximo_seq})")
             sock.send(pacote_msg.encode('utf-8'))
             time.sleep(0.01)
@@ -286,8 +320,8 @@ def enviar_janela_sr(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado):
                     # Se o ACK for para um pacote que ainda está pendente...
                     if ack_num in pacotes_enviados_pendentes:
                         pacotes_enviados_pendentes.pop(ack_num) # Remove dos pendentes
-                        pacotes_ackados.add(ack_num)     # Adiciona aos ACKados
-                        total_enviados += 1              # Incrementa o total
+                        pacotes_ackados.add(ack_num)      # Adiciona aos ACKados
+                        total_enviados += 1               # Incrementa o total
                         
                     # 3. Desliza a janela (a 'base')
                     # Se o ACK recebido for o da base, desliza a janela
@@ -400,8 +434,13 @@ def main():
             print(f">> [CLIENTE] Mensagem dividida em {len(pacotes)} pacotes (tamanho por pacote = {tamanho_caracteres}).")
 
             # Informa ao servidor a configuração (Janela E Total) para essa mensagem
-            config_msg = f"{qnt_pacotes}|{len(pacotes)}| {seq}"
-            print(f">> [CLIENTE] Enviando configuração (Janela={qnt_pacotes}, Total={len(pacotes)})")
+            
+            # --- CORREÇÃO DE BUG ---
+            # Removemos o espaço antes do {seq} que causava o bug NACK:0
+            config_msg = f"{qnt_pacotes}|{len(pacotes)}|{seq}"
+            # --- FIM DA CORREÇÃO ---
+            
+            print(f">> [CLIENTE] Enviando configuração (Janela={qnt_pacotes}, Total={len(pacotes)}, Base={seq})")
             try:
                 sock.send(config_msg.encode('utf-8'))
             except Exception as e:
@@ -434,6 +473,12 @@ def main():
 
     finally:
         # Fecha a conexão
+        try:
+            # Informa ao servidor que está saindo
+            sock.send("SAIR".encode('utf-8'))
+        except Exception:
+            pass # Ignora erro se o socket já fechou
+            
         try:
             sock.close()
         except Exception:

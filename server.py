@@ -152,11 +152,17 @@ def comunicacao_cliente(sock_client, modo): # <--- Aceita 'modo'
                 parts = config_data.split('|')
                 qnt_pacotes_janela = int(parts[0])
                 total_pacotes_msg = int(parts[1])
+                
+                # --- *** A CORREÇÃO ESTÁ AQUI (1/3) *** ---
+                # Lemos a sequência inicial (parts[2]) que o cliente enviou.
+                # .strip() remove espaços em branco (caso o cliente tenha enviado " |49")
+                seq_inicial_msg = int(parts[2].strip()) 
+                
             except (ValueError, IndexError):
                 print(f">> [SERVIDOR] ERRO: Configuração inválida recebida: {config_data}")
                 continue
                 
-            print(f">> [SERVIDOR] Config recebida: Janela={qnt_pacotes_janela}, Total={total_pacotes_msg}")
+            print(f">> [SERVIDOR] Config recebida: Janela={qnt_pacotes_janela}, Total={total_pacotes_msg}, Base={seq_inicial_msg}")
             
             # ==========================================================
             # ROTEADOR DE PROTOCOLO (GBN ou SR)
@@ -166,7 +172,12 @@ def comunicacao_cliente(sock_client, modo): # <--- Aceita 'modo'
                 print_titulo("MODO GO-BACK-N ATIVADO")
                 
                 # Variáveis de estado do GBN
-                rec_seq = None 
+                
+                # --- *** A CORREÇÃO ESTÁ AQUI (2/3) *** ---
+                # Definimos o 'rec_seq' esperado com o valor que lemos,
+                # em vez de começar com 'None'.
+                rec_seq = seq_inicial_msg
+                
                 pacotes_recebidos_total = 0
                 mensagem_completa = ""
                 
@@ -181,14 +192,9 @@ def comunicacao_cliente(sock_client, modo): # <--- Aceita 'modo'
                     
                     # Loop de recebimento da Janela
                     for i in range(qnt_esperada_janela):
-                        # Este recv pode falhar se o cliente não enviar o pacote (simulação de perda)
                         try:
                             data_full = sock_client.recv(1024).decode('utf-8')
                         except socket.timeout:
-                            # Se um pacote não chegar, o próximo recv estoura.
-                            # No GBN, estourar o timer *no cliente* é o que inicia a retransmissão,
-                            # mas aqui estamos esperando ativamente. Se o cliente parou de enviar,
-                            # tratamos como desconexão.
                             data_full = ""
 
                         if not data_full:
@@ -216,15 +222,14 @@ def comunicacao_cliente(sock_client, modo): # <--- Aceita 'modo'
                             pacotes_descartados = True
                             continue
                             
-                        if rec_seq is None:
-                            rec_seq = seq_recebido
+                        # Não precisamos mais do 'if rec_seq is None:', 
+                        # pois 'rec_seq' já é 49.
 
                         if flag == "MSG" and seq_recebido == rec_seq:
                             print(f">> [GBN-SERV] Pacote {i+1} (SEQ={seq_recebido}) recebido com sucesso.")
                             mensagem_completa += msg_data
                             rec_seq += 1 
                         else:
-                            # Pacote fora de ordem (GBN!), ou seja, o pacote rec_seq foi perdido/corrompido.
                             print(f">> [GBN-SERV] ERRO: Pacote inesperado (Flag:{flag}, Esperado_SEQ:{rec_seq}, Recebido_SEQ:{seq_recebido})")
                             print(f">> [GBN-SERV] Descartando pacote {i+1} e o resto da janela.")
                             pacotes_descartados = True
@@ -234,14 +239,17 @@ def comunicacao_cliente(sock_client, modo): # <--- Aceita 'modo'
                     if not data_full and pacotes_descartados:
                         break
                     
+                    # --- *** A CORREÇÃO ESTÁ AQUI (3/3) *** ---
+                    # Agora 'rec_seq' tem o valor correto (ex: 49)
+                    # A verificação 'if rec_seq is not None' não é mais necessária,
+                    # mas não quebra se ficar. O 'else 0' nunca será usado.
                     ack_response = rec_seq if rec_seq is not None else 0
 
                     if pacotes_descartados:
-                        # Envia NACK:N, onde N é o pacote que *esperamos* (rec_seq)
                         resposta = f"NACK:{ack_response}"
+                        # AGORA VAI MOSTRAR O NÚMERO CORRETO (ex: 49)
                         print(f">> [GBN-SERV] Janela falhou. Enviando NACK para {ack_response}.")
                     else:
-                        # Envia ACK:N, onde N é o próximo pacote *esperado* (rec_seq)
                         resposta = f"ACK:{ack_response}"
                         print(f">> [GBN-SERV] Janela recebida com sucesso. Enviando ACK cumulativo: {ack_response}.")
                         pacotes_recebidos_total += qnt_esperada_janela
@@ -257,14 +265,13 @@ def comunicacao_cliente(sock_client, modo): # <--- Aceita 'modo'
             elif modo == "RepetiçãoSeletiva":
                 print_titulo("MODO REPETIÇÃO SELETIVA ATIVADO")
                 try:
-                    # Pega o SEQ inicial da configuração (parts[2])
-                    rec_seq_inicial = int(parts[2]) 
+                    # Agora ele usa a variável 'seq_inicial_msg' que lemos lá em cima
+                    rec_seq_inicial = seq_inicial_msg
                     print(f">> [SR-SERV] Base de sequência inicial esperada: {rec_seq_inicial}")
                 except (ValueError, IndexError):
                     print(f">> [SERVIDOR] ERRO: Config SR não incluiu SEQ inicial. {config_data}")
-                    continue # Volta ao loop de esperar config
+                    continue 
                 
-                # Chama a função SR (ela agora faz todo o trabalho)
                 comunicacao_cliente_sr(sock_client, 
                                        qnt_pacotes_janela, 
                                        total_pacotes_msg, 
