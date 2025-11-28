@@ -119,11 +119,19 @@ def handshake(sock):
 
 def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado, seguranca):
     """
-    Função GBN Atualizada com Criptografia (objeto 'seguranca')
+    Função GBN com Criptografia e Erro GARANTIDO (apenas aqui).
     """
     seq_base = seq_inicial 
     total_pacotes = len(pacotes)
     num_pacote_enviado = 0 
+
+    # --- LÓGICA DE ERRO GARANTIDO (Apenas no GBN) ---
+    # Sorteia qual pacote VAI falhar com certeza nesta transmissão
+    pacote_azarado = -1
+    if erro_simulado == "3" and total_pacotes > 0:
+        pacote_azarado = random.randint(0, total_pacotes - 1)
+        print(f">> [DEBUG-SISTEMA] O pacote {pacote_azarado + 1}/{total_pacotes} foi sorteado para falhar obrigatoriamente.")
+    # --------------------------------
 
     while num_pacote_enviado < total_pacotes:
         idx_inicio = num_pacote_enviado
@@ -135,30 +143,43 @@ def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado, seg
         for i, msg in enumerate(janela):
             flag = "MSG"
             seq_atual = seq_base + i
+            indice_absoluto = idx_inicio + i # Índice real do pacote
             
-            # --- CRIPTOGRAFIA AQUI ---
-            # Criptografa o conteúdo da mensagem antes de empacotar
+            # --- CRIPTOGRAFIA ---
             msg_encriptada = seguranca.encrypt(msg)
-            # -------------------------
+            # --------------------
         
             data_pacote = f"{flag}|{msg_encriptada}|{seq_atual}"
             checksum = calculate_checksum(data_pacote)
             pacote_msg = f"{data_pacote}|{checksum}"
             
-            if erro_simulado == "3" and random.random() < 0.10: 
-                print(f">> [CLIENTE-ERRO] SIMULANDO PERDA do pacote {idx_inicio + i + 1}/{total_pacotes} (SEQ={seq_atual})...")
+            # --- LÓGICA DE PERDA (Garantida OU Aleatória) ---
+            deve_perder = False
+            
+            if erro_simulado == "3":
+                # 1. É o pacote escolhido para dar erro?
+                if indice_absoluto == pacote_azarado:
+                    deve_perder = True
+                    pacote_azarado = -1 # Reseta para não falhar na retransmissão
+                # 2. Ou caiu nos 10% aleatórios?
+                elif random.random() < 0.10:
+                    deve_perder = True
+
+            if deve_perder:
+                print(f">> [CLIENTE-ERRO] SIMULANDO PERDA do pacote {indice_absoluto + 1}/{total_pacotes} (SEQ={seq_atual})...")
                 time.sleep(0.01)
                 continue
-            
+            # ------------------------------------------------
+
             elif erro_simulado == "4" and random.random() < 0.10: 
                 dados_corrompidos = data_pacote + "X" 
                 pacote_corrompido = f"{dados_corrompidos}|{checksum}"
-                print(f">> [CLIENTE-ERRO] SIMULANDO CORRUPÇÃO do pacote {idx_inicio + i + 1}/{total_pacotes} (SEQ={seq_atual}).")
+                print(f">> [CLIENTE-ERRO] SIMULANDO CORRUPÇÃO do pacote {indice_absoluto + 1}/{total_pacotes} (SEQ={seq_atual}).")
                 sock.send(pacote_corrompido.encode('utf-8'))
                 time.sleep(0.01)
                 continue 
 
-            print(f">> [CLIENTE] Enviando pacote {idx_inicio + i + 1}/{total_pacotes} (SEQ={seq_atual}) [Criptografado]")
+            print(f">> [CLIENTE] Enviando pacote {indice_absoluto + 1}/{total_pacotes} (SEQ={seq_atual}) [Criptografado]")
             sock.send(pacote_msg.encode('utf-8'))
             time.sleep(0.01) 
 
@@ -200,7 +221,7 @@ def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado, seg
 
 def enviar_janela_sr(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado, seguranca):
     """
-    Função SR Atualizada com Criptografia (objeto 'seguranca')
+    Função SR com Criptografia (SEM erro garantido, apenas aleatório).
     """
     seq_base = seq_inicial
     proximo_seq = seq_inicial
@@ -220,9 +241,9 @@ def enviar_janela_sr(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado, 
             idx = proximo_seq - seq_inicial
             msg = pacotes[idx]
             
-            # --- CRIPTOGRAFIA AQUI ---
+            # --- CRIPTOGRAFIA ---
             msg_encriptada = seguranca.encrypt(msg)
-            # -------------------------
+            # --------------------
 
             data_pacote = f"MSG|{msg_encriptada}|{proximo_seq}"
             checksum = calculate_checksum(data_pacote)
@@ -230,11 +251,13 @@ def enviar_janela_sr(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado, 
 
             pacotes_enviados_pendentes[proximo_seq] = pacote_msg 
             
+            # --- LÓGICA DE PERDA (Apenas Aleatória aqui) ---
             if erro_simulado == "3" and random.random() < 0.10: 
                 print(f">> [SR-CLIENTE-ERRO] SIMULANDO PERDA do pacote {idx + 1}/{total_pacotes_msg} (SEQ={proximo_seq})...")
                 time.sleep(0.01)
                 proximo_seq += 1 
                 continue
+            # -----------------------------------------------
             
             elif erro_simulado == "4" and random.random() < 0.10: 
                 dados_corrompidos = data_pacote + "X" 
