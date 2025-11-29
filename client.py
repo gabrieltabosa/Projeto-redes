@@ -241,7 +241,6 @@ def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado, seg
     print("\n>> [CLIENTE] Todos os pacotes da mensagem foram enviados com sucesso!")
     return seq_base
 
-# 
 
 def enviar_janela_sr(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado, seguranca):
     """
@@ -425,11 +424,15 @@ def main():
             pacotes = dividir_mensagem(tamanho_caracteres, message)
             print(f">> [CLIENTE] Mensagem dividida em {len(pacotes)} pacotes.")
 
-            config_msg = f"{qnt_pacotes}|{len(pacotes)}|{seq}"
+            # --- CORREÇÃO: ADICIONANDO CHECKSUM À MENSAGEM DE CONFIGURAÇÃO ---
+            config_data = f"{qnt_pacotes}|{len(pacotes)}|{seq}"
+            checksum_config = calculate_checksum(config_data)
+            config_msg_full = f"{config_data}|{checksum_config}"
+            # ------------------------------------------------------------------
             
             print(f">> [CLIENTE] Enviando configuração (Janela={qnt_pacotes}, Total={len(pacotes)}, Base={seq})")
             try:
-                sock.send(config_msg.encode('utf-8'))
+                sock.send(config_msg_full.encode('utf-8'))
                 # Pausa para evitar que a configuração cole nos dados
                 time.sleep(0.2) 
             except Exception as e:

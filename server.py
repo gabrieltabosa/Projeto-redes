@@ -119,20 +119,29 @@ def comunicacao_cliente(sock_client, modo, seguranca):
             
             print("\n>> [SERVIDOR] Aguardando configuração de mensagem do cliente...")
             try:
-                config_data = sock_client.recv(1024).decode('utf-8')
+                # Recebendo a mensagem de configuração completa (incluindo checksum)
+                config_full = sock_client.recv(1024).decode('utf-8').strip()
             except (socket.timeout, TimeoutError):
                 continue 
             
-            if not config_data:
+            if not config_full:
                 print(">> [SERVIDOR] Cliente desconectou.")
                 break
                 
-            if config_data == "SAIR":
+            if config_full == "SAIR":
                 print(">> [SERVIDOR] Cliente solicitou encerramento.")
                 break
 
+            # NOVO: Verificar o checksum da mensagem de configuração
+            is_valid_config, config_data = verify_checksum(config_full)
+            if not is_valid_config:
+                print(f">> [SERVIDOR] ERRO: Checksum da Configuração inválido: {config_full}")
+                continue # Pula para a próxima iteração do loop (aguarda reenvio, se o cliente fizer)
+            
             try:
+                # Extraindo os dados da configuração (agora 'config_data' sem o checksum)
                 parts = config_data.split('|')
+                # A linha de código original foi: parts = config_data.split('|'), então removemos a linha config_data = sock_client.recv(1024).decode('utf-8')
                 qnt_pacotes_janela = int(parts[0])
                 total_pacotes_msg = int(parts[1])
                 seq_inicial_msg = int(parts[2].strip()) 
@@ -141,7 +150,7 @@ def comunicacao_cliente(sock_client, modo, seguranca):
                 print(f">> [SERVIDOR] ERRO: Configuração inválida recebida: {config_data}")
                 continue
                 
-            print(f">> [SERVIDOR] Config recebida: Janela={qnt_pacotes_janela}, Total={total_pacotes_msg}, Base={seq_inicial_msg}")
+            print(f">> [SERVIDOR] Config (checksum OK) recebida: Janela={qnt_pacotes_janela}, Total={total_pacotes_msg}, Base={seq_inicial_msg}")
             
             if modo == "GoBackN":
                 print_titulo("MODO GO-BACK-N ATIVADO")
@@ -227,12 +236,12 @@ def comunicacao_cliente(sock_client, modo, seguranca):
                     ack_response = rec_seq
                     
                     if pacotes_validos_na_janela > 0:
-                         pacotes_recebidos_total += pacotes_validos_na_janela
-                         print(f">> [GBN-SERV] Janela processada. Enviando ACK cumulativo: {ack_response}")
-                         resposta = f"ACK:{ack_response}"
+                            pacotes_recebidos_total += pacotes_validos_na_janela
+                            print(f">> [GBN-SERV] Janela processada. Enviando ACK cumulativo: {ack_response}")
+                            resposta = f"ACK:{ack_response}"
                     else:
-                         print(f">> [GBN-SERV] Janela sem progresso. Enviando NACK para {ack_response}")
-                         resposta = f"NACK:{ack_response}"
+                            print(f">> [GBN-SERV] Janela sem progresso. Enviando NACK para {ack_response}")
+                            resposta = f"NACK:{ack_response}"
                     
                     checksum_resp = calculate_checksum(resposta)
                     resposta_full = f"{resposta}|{checksum_resp}"
@@ -251,10 +260,10 @@ def comunicacao_cliente(sock_client, modo, seguranca):
                     continue 
                 
                 comunicacao_cliente_sr(sock_client, 
-                                       qnt_pacotes_janela, 
-                                       total_pacotes_msg, 
-                                       rec_seq_inicial,
-                                       seguranca)
+                                        qnt_pacotes_janela, 
+                                        total_pacotes_msg, 
+                                        rec_seq_inicial,
+                                        seguranca)
 
         except (socket.timeout, TimeoutError):
             print(f"\n>> [SERVIDOR] ERRO: Cliente inativo por {INACTIVITY_TIMEOUT}s. Encerrando.")
@@ -272,7 +281,7 @@ def comunicacao_cliente_sr(sock_client, qnt_pacotes_janela, total_pacotes_msg, r
     
     print(f"\n>> [SR-SERV] Aguardando {total_pacotes_msg} pacotes (Janela={qnt_pacotes_janela}, Base={rec_seq_inicial})")
     
-    rec_seq = rec_seq_inicial      
+    rec_seq = rec_seq_inicial       
     pacotes_recebidos_total = 0 
     mensagem_completa = ""
     
