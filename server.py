@@ -4,6 +4,8 @@ from security import SecurityManager
 
 HANDSHAKE_TIMEOUT = 10.0
 INACTIVITY_TIMEOUT = 300.0 
+# REDUZIDO PARA 0.5s: Servidor deve detectar perda rápido para não travar o cliente
+WINDOW_RECEIVE_TIMEOUT = 0.5 
 
 # ==============================================================================
 # FUNÇÕES AUXILIARES
@@ -95,7 +97,7 @@ def process_handshake(sock_client):
             print(">> [SERVIDOR] ERRO: Formato de SYN inválido.")
             return None, None
             
-    except socket.timeout:
+    except (socket.timeout, TimeoutError):
         print("\n>> [SERVIDOR] TIMER ESTOUROU") 
         print(f">> [SERVIDOR] ERRO: Timeout no handshake")
         return None, None
@@ -107,12 +109,19 @@ def process_handshake(sock_client):
 # --- LÓGICA DO SERVIDOR (COM SEGURANÇA) ---
 def comunicacao_cliente(sock_client, modo, seguranca): 
 
+    # BUFFER GLOBAL PARA O SERVIDOR LIDAR COM COLAGEM DE PACOTES
+    buffer_entrada = ""
+
     while True:
         try:
+            # Timeout longo padrão para inatividade geral
             sock_client.settimeout(INACTIVITY_TIMEOUT)
             
             print("\n>> [SERVIDOR] Aguardando configuração de mensagem do cliente...")
-            config_data = sock_client.recv(1024).decode('utf-8')
+            try:
+                config_data = sock_client.recv(1024).decode('utf-8')
+            except (socket.timeout, TimeoutError):
+                continue 
             
             if not config_data:
                 print(">> [SERVIDOR] Cliente desconectou.")
@@ -141,33 +150,47 @@ def comunicacao_cliente(sock_client, modo, seguranca):
                 pacotes_recebidos_total = 0
                 mensagem_completa = ""
                 
+                # Limpa buffer para nova transmissão
+                buffer_entrada = ""
+                
                 while pacotes_recebidos_total < total_pacotes_msg:
                     
                     qnt_esperada_janela = min(qnt_pacotes_janela, total_pacotes_msg - pacotes_recebidos_total)
-                    print(f"\n>> [GBN-SERV] Aguardando janela... (Esperando {qnt_esperada_janela} pacotes de {total_pacotes_msg} total)")
+                    print(f"\n>> [GBN-SERV] Aguardando janela... (Esperando {qnt_esperada_janela} pacotes)")
                     
-                    pacotes_descartados = False
-                    data_full = "" 
+                    pacotes_validos_na_janela = 0
                     
+                    # Usa timeout curto para detectar perda rapidamente
+                    sock_client.settimeout(WINDOW_RECEIVE_TIMEOUT)
+                    
+                    # Loop para consumir a quantidade de pacotes esperados
                     for i in range(qnt_esperada_janela):
+                        
+                        # --- LÓGICA DE BUFFER PARA SEPARAR PACOTES ---
                         try:
-                            data_full = sock_client.recv(2048).decode('utf-8') # Aumentei buffer p/ dados criptografados
-                        except socket.timeout:
+                            while '\n' not in buffer_entrada:
+                                temp_data = sock_client.recv(2048).decode('utf-8')
+                                if not temp_data: break
+                                buffer_entrada += temp_data
+                            
+                            if '\n' in buffer_entrada:
+                                data_full, buffer_entrada = buffer_entrada.split('\n', 1)
+                            else:
+                                data_full = "" # Timeout ou fim de stream sem newline
+                                
+                        except (socket.timeout, TimeoutError):
+                            print(">> [GBN-SERV] Timeout: Cliente parou de enviar (provável perda simulada).")
                             data_full = ""
+                            break 
+                        # ---------------------------------------------
 
                         if not data_full:
-                            print(">> [GBN-SERV] Cliente desconectou/parou de enviar no meio da janela.")
-                            pacotes_descartados = True
+                            print(">> [GBN-SERV] Sem dados completos (Timeout ou desconexão).")
                             break 
-
-                        if pacotes_descartados:
-                            print(f">> [GBN-SERV] (Descartando pacote {i+1} da janela - base já corrompida)")
-                            continue
 
                         is_valid, data_part = verify_checksum(data_full)
                         if not is_valid:
-                            print(f">> [GBN-SERV] ERRO: Checksum inválido. Descartando pacote {i+1} e o resto da janela.")
-                            pacotes_descartados = True
+                            print(f">> [GBN-SERV] Checksum inválido no pacote {i+1}. Ignorando.")
                             continue 
 
                         try:
@@ -176,45 +199,46 @@ def comunicacao_cliente(sock_client, modo, seguranca):
                             msg_data_encriptada = parts_data[1]
                             seq_recebido = int(parts_data[2])
                         except (IndexError, ValueError):
-                            print(f">> [GBN-SERV] ERRO: Pacote malformado. {data_part}")
-                            pacotes_descartados = True
+                            print(f">> [GBN-SERV] Pacote malformado. Ignorando.")
                             continue
 
-                        if flag == "MSG" and seq_recebido == rec_seq:
-                            # --- DESCRIPTOGRAFIA ---
-                            try:
-                                msg_original = seguranca.decrypt(msg_data_encriptada)
-                                print(f">> [GBN-SERV] Pacote {i+1} (SEQ={seq_recebido}) recebido e descriptografado: '{msg_original}'")
-                                mensagem_completa += msg_original
-                                rec_seq += 1 
-                            except Exception as e:
-                                print(f">> [GBN-SERV] ERRO SEGURANÇA: Falha ao descriptografar: {e}")
-                                pacotes_descartados = True
-                                continue
-                            # -----------------------
+                        if flag == "MSG":
+                            if seq_recebido == rec_seq:
+                                try:
+                                    msg_original = seguranca.decrypt(msg_data_encriptada)
+                                    print(f">> [GBN-SERV] Pacote aceito (SEQ={seq_recebido}): '{msg_original}'")
+                                    mensagem_completa += msg_original
+                                    rec_seq += 1 
+                                    pacotes_validos_na_janela += 1
+                                except Exception as e:
+                                    print(f">> [GBN-SERV] ERRO SEGURANÇA: {e}")
+                                    
+                            elif seq_recebido < rec_seq:
+                                print(f">> [GBN-SERV] Pacote duplicado (SEQ={seq_recebido}). Ignorando (Já temos).")
+                            else:
+                                print(f">> [GBN-SERV] Pacote fora de ordem (SEQ={seq_recebido}, Esperado={rec_seq}). Descartando.")
                         else:
-                            print(f">> [GBN-SERV] ERRO: Pacote inesperado (Flag:{flag}, Esperado_SEQ:{rec_seq}, Recebido_SEQ:{seq_recebido})")
-                            pacotes_descartados = True
-                            continue 
+                            print(f">> [GBN-SERV] Flag desconhecida: {flag}")
 
-                    if not data_full and pacotes_descartados:
-                        break
+                    # Restaura timeout longo
+                    sock_client.settimeout(INACTIVITY_TIMEOUT)
                     
-                    ack_response = rec_seq if rec_seq is not None else 0
-
-                    if pacotes_descartados:
-                        resposta = f"NACK:{ack_response}"
-                        print(f">> [GBN-SERV] Janela falhou. Enviando NACK para {ack_response}.")
+                    # ACK cumulativo
+                    ack_response = rec_seq
+                    
+                    if pacotes_validos_na_janela > 0:
+                         pacotes_recebidos_total += pacotes_validos_na_janela
+                         print(f">> [GBN-SERV] Janela processada. Enviando ACK cumulativo: {ack_response}")
+                         resposta = f"ACK:{ack_response}"
                     else:
-                        resposta = f"ACK:{ack_response}"
-                        print(f">> [GBN-SERV] Janela recebida com sucesso. Enviando ACK cumulativo: {ack_response}.")
-                        pacotes_recebidos_total += qnt_esperada_janela
+                         print(f">> [GBN-SERV] Janela sem progresso. Enviando NACK para {ack_response}")
+                         resposta = f"NACK:{ack_response}"
                     
                     checksum_resp = calculate_checksum(resposta)
                     resposta_full = f"{resposta}|{checksum_resp}"
                     sock_client.send(resposta_full.encode('utf-8'))
 
-                if pacotes_recebidos_total == total_pacotes_msg:
+                if pacotes_recebidos_total >= total_pacotes_msg:
                     print(f"\n>> [SERVIDOR] Mensagem completa (GBN) recebida: '{mensagem_completa}'")
 
             elif modo == "RepetiçãoSeletiva":
@@ -226,18 +250,19 @@ def comunicacao_cliente(sock_client, modo, seguranca):
                     print(f">> [SERVIDOR] ERRO: Config SR não incluiu SEQ inicial. {config_data}")
                     continue 
                 
-                # Passando o objeto seguranca
                 comunicacao_cliente_sr(sock_client, 
                                        qnt_pacotes_janela, 
                                        total_pacotes_msg, 
                                        rec_seq_inicial,
                                        seguranca)
 
-        except socket.timeout:
+        except (socket.timeout, TimeoutError):
             print(f"\n>> [SERVIDOR] ERRO: Cliente inativo por {INACTIVITY_TIMEOUT}s. Encerrando.")
             break
         except Exception as e:
-            print(f"\n>> [SERVIDOR] ERRO na comunicação: {e}. Encerrando conexão.")
+            print(f"\n>> [SERVIDOR] ERRO CRÍTICO na comunicação: {e}. Encerrando conexão.")
+            import traceback
+            traceback.print_exc() 
             break
 
     print(">> [SERVIDOR] Cliente desconectado!")
@@ -252,19 +277,34 @@ def comunicacao_cliente_sr(sock_client, qnt_pacotes_janela, total_pacotes_msg, r
     mensagem_completa = ""
     
     buffer_recebimento = {} 
+    buffer_entrada = ""
 
     while pacotes_recebidos_total < total_pacotes_msg:
         try:
             sock_client.settimeout(INACTIVITY_TIMEOUT)
-            data_full = sock_client.recv(2048).decode('utf-8') # Buffer aumentado
             
+            # --- LÓGICA DE BUFFER PARA SEPARAR PACOTES ---
+            try:
+                while '\n' not in buffer_entrada:
+                    temp_data = sock_client.recv(2048).decode('utf-8')
+                    if not temp_data: break
+                    buffer_entrada += temp_data
+                
+                if '\n' in buffer_entrada:
+                    data_full, buffer_entrada = buffer_entrada.split('\n', 1)
+                else:
+                    data_full = ""
+            except Exception:
+                data_full = ""
+            # ---------------------------------------------
+
             if not data_full:
-                print(">> [SR-SERV] Cliente desconectou inesperadamente.")
+                print(">> [SR-SERV] Cliente desconectou ou erro de leitura.")
                 return False
 
             is_valid, data_part = verify_checksum(data_full)
             if not is_valid:
-                print(f">> [SR-SERV] ERRO: Checksum inválido. Descartando pacote (Descarte Passivo).")
+                print(f">> [SR-SERV] Checksum inválido.")
                 continue 
 
             try:
@@ -273,61 +313,45 @@ def comunicacao_cliente_sr(sock_client, qnt_pacotes_janela, total_pacotes_msg, r
                 msg_data_encriptada = parts[1]
                 seq_recebido = int(parts[2])
             except (IndexError, ValueError):
-                print(f">> [SR-SERV] ERRO: Pacote malformado. {data_part}")
                 continue
 
             if flag != "MSG":
-                print(f">> [SR-SERV] Pacote não é MSG, ignorando: {flag}")
                 continue
 
             if seq_recebido < rec_seq:
-                print(f">> [SR-SERV] Pacote duplicado (SEQ={seq_recebido}) recebido. Reenviando ACK.")
+                print(f">> [SR-SERV] Duplicado (SEQ={seq_recebido}). Reenviando ACK.")
                 enviar_ack_sr(sock_client, seq_recebido)
                 continue
 
             if rec_seq <= seq_recebido < (rec_seq + qnt_pacotes_janela):
                 
-                # --- DESCRIPTOGRAFIA ---
                 try:
                     msg_original = seguranca.decrypt(msg_data_encriptada)
-                except Exception as e:
-                    print(f">> [SR-SERV] ERRO SEGURANÇA: Falha ao descriptografar pacote {seq_recebido}. Descartando.")
+                except Exception:
                     continue
-                # -----------------------
 
-                print(f">> [SR-SERV] Pacote (SEQ={seq_recebido}) recebido e descriptografado. Enviando ACK-SR.")
+                print(f">> [SR-SERV] Pacote (SEQ={seq_recebido}) recebido. Enviando ACK-SR.")
                 enviar_ack_sr(sock_client, seq_recebido) 
                 
                 if seq_recebido == rec_seq:
-                    print(f">> [SR-SERV] Pacote {seq_recebido} (base) aceito: '{msg_original}'")
                     mensagem_completa += msg_original
                     pacotes_recebidos_total += 1
                     rec_seq += 1 
 
                     while rec_seq in buffer_recebimento:
-                        print(f">> [SR-SERV] Entregando pacote {rec_seq} do buffer.")
                         data_buffer = buffer_recebimento.pop(rec_seq)
                         mensagem_completa += data_buffer
                         pacotes_recebidos_total += 1
                         rec_seq += 1 
-                    
-                    print(f">> [SR-SERV] Nova base: {rec_seq}")
-
                 else:
                     if seq_recebido not in buffer_recebimento:
-                        print(f">> [SR-SERV] Pacote {seq_recebido} (fora de ordem) bufferizado.")
                         buffer_recebimento[seq_recebido] = msg_original
-                    else:
-                        print(f">> [SR-SERV] Pacote {seq_recebido} (bufferizado) duplicado. ACK reenviado.")
 
-            else:
-                print(f">> [SR-SERV] ERRO: Pacote {seq_recebido} fora da janela (Base={rec_seq}). Descartado.")
-
-        except socket.timeout:
-            print(f"\n>> [SR-SERV] ERRO: Cliente inativo por {INACTIVITY_TIMEOUT}s. Encerrando.")
+        except (socket.timeout, TimeoutError):
+            print(f"\n>> [SR-SERV] Inatividade.")
             return False
         except Exception as e:
-            print(f"\n>> [SR-SERV] ERRO na comunicação: {e}. Encerrando conexão.")
+            print(f"\n>> [SR-SERV] Erro: {e}")
             return False
 
     print(f"\n>> [SERVIDOR] Mensagem completa (SR) recebida: '{mensagem_completa}'")
@@ -335,41 +359,31 @@ def comunicacao_cliente_sr(sock_client, qnt_pacotes_janela, total_pacotes_msg, r
 
 
 def main():
-    
-    # =========================================================================
-    # CONFIGURAÇÃO DE SEGURANÇA
-    # =========================================================================
-    # A chave DEVE SER A MESMA usada no client.py
     SHARED_KEY = b'Z7w1-8XNf7wJt7rXq4Y5zL3mP9nQ2vR6kS8tV5wX1yZ=' 
     seguranca = SecurityManager(SHARED_KEY)
     print(f">> [SEGURANÇA] Criptografia Ativada.")
-    # =========================================================================
 
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        
         sock.bind(('localhost', 1500))
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.listen(1)
         print(f"\n>> [SERVIDOR] Ouvindo em localhost 1500")
 
         sock_client, endereco = sock.accept()
-        
         modo, tam_max = process_handshake(sock_client) 
-        print(f">> [SERVIDOR] Cliente de endereço: {endereco}, conectado!")
-
+        
         if modo and tam_max:
-            print(f">> [SERVIDOR] Modo de operação: {modo}, Tamanho máximo de pacote: {tam_max}")
-            # Passando o objeto seguranca
             comunicacao_cliente(sock_client, modo, seguranca)  
 
         sock_client.close()
-
     except Exception as e:
-        print(f"Erro principal no servidor: {e}")
+        print(f"Erro principal: {e}")
     finally:
-        sock.close()
-        print(">> [SERVIDOR] Servidor encerrado.")
+        try:
+            sock.close()
+        except:
+            pass
 
 if __name__ == "__main__":
     main()
