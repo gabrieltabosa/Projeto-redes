@@ -1,11 +1,11 @@
 
-# 📡 Simulação de Protocolo RDT (Reliable Data Transfer) sobre TCP
+# Simulação de Protocolo RDT (Reliable Data Transfer) sobre TCP
 
 Este projeto implementa uma simulação robusta de protocolos de transferência confiável de dados (RDT) utilizando Sockets em Python. O sistema emula o comportamento da camada de transporte, demonstrando visualmente o funcionamento de janelas deslizantes, criptografia e tratamento de erros.
 
 ---
 
-## 📋 Funcionalidades Implementadas
+## Funcionalidades Implementadas
 
 O projeto suporta dois modos de operação de janelas deslizantes (**Sliding Windows**):
 
@@ -25,7 +25,7 @@ O projeto suporta dois modos de operação de janelas deslizantes (**Sliding Win
 
 ---
 
-## 🛠️ Pré-requisitos e Instalação
+## Instalação
 
 Para rodar este projeto, você precisa do **Python 3.x** instalado.  
 Além disso, é necessário instalar a biblioteca de criptografia:
@@ -34,7 +34,7 @@ pip install cryptography
 
 ---
 
-## 📂 Estrutura dos Arquivos
+##  Estrutura dos Arquivos
 
 Certifique-se de que os arquivos do projeto estejam nomeados exatamente desta forma na mesma pasta:
 
@@ -44,7 +44,7 @@ Certifique-se de que os arquivos do projeto estejam nomeados exatamente desta fo
 
 ---
 
-## 🚀 Como Executar
+##  Como Executar
 
 O sistema funciona em arquitetura Cliente-Servidor. Você precisará de dois terminais abertos.
 
@@ -62,7 +62,7 @@ python client.py
 
 ---
 
-## 🎮 Guia de Uso Interativo
+##  Guia de Uso 
 
 Após iniciar o `client.py`, siga as instruções no terminal:
 
@@ -84,8 +84,18 @@ Após iniciar o `client.py`, siga as instruções no terminal:
 
 ---
 
-## 🔍 Detalhes de Configuração
+##  Detalhes de Configuração
 
 - **Porta:** 1500 (Localhost)  
 - **Timeout de Retransmissão:** 3.0 segundos  
 - **Fragmentação:** As mensagens são divididas em blocos de 4 caracteres para facilitar a visualização didática do fluxo de muitos pacotes
+
+## Integrantes do Grupo
+
+- Arthur Apolinário
+- Antônio Laprovitera
+- Felipe Andrade
+- Gabriel Tabosa
+- Guilherme Vinícius
+- Letícia Soares
+- Pedro Gusmão

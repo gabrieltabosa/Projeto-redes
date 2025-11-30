@@ -4,12 +4,9 @@ from security import SecurityManager
 
 HANDSHAKE_TIMEOUT = 10.0
 INACTIVITY_TIMEOUT = 300.0 
-# REDUZIDO PARA 0.5s: Servidor deve detectar perda rápido para não travar o cliente
 WINDOW_RECEIVE_TIMEOUT = 0.5 
 
-# ==============================================================================
-# FUNÇÕES AUXILIARES
-# ==============================================================================
+# funções auxiliares
 
 def print_titulo(texto):
     print("\n" + "=" * 80)
@@ -36,9 +33,7 @@ def verify_checksum(full_packet: str) -> (bool, str):
     except (ValueError, IndexError):
         return (False, None)
 
-# ==============================================================================
-# LÓGICA DO PROTOCOLO
-# ==============================================================================
+# lógica do protocolo
 
 def enviar_ack_sr(sock_client, seq_num):
     resposta = f"ACK-SR:{seq_num}"
@@ -106,20 +101,19 @@ def process_handshake(sock_client):
         return None, None
 
 
-# --- LÓGICA DO SERVIDOR (COM SEGURANÇA) ---
+# lógica do servidor
 def comunicacao_cliente(sock_client, modo, seguranca): 
 
-    # BUFFER GLOBAL PARA O SERVIDOR LIDAR COM COLAGEM DE PACOTES
+    # buffer global
     buffer_entrada = ""
 
     while True:
         try:
-            # Timeout longo padrão para inatividade geral
+            # uso do timeout
             sock_client.settimeout(INACTIVITY_TIMEOUT)
             
             print("\n>> [SERVIDOR] Aguardando configuração de mensagem do cliente...")
             try:
-                # Recebendo a mensagem de configuração completa (incluindo checksum)
                 config_full = sock_client.recv(1024).decode('utf-8').strip()
             except (socket.timeout, TimeoutError):
                 continue 
@@ -132,16 +126,14 @@ def comunicacao_cliente(sock_client, modo, seguranca):
                 print(">> [SERVIDOR] Cliente solicitou encerramento.")
                 break
 
-            # NOVO: Verificar o checksum da mensagem de configuração
+            # checksum
             is_valid_config, config_data = verify_checksum(config_full)
             if not is_valid_config:
                 print(f">> [SERVIDOR] ERRO: Checksum da Configuração inválido: {config_full}")
-                continue # Pula para a próxima iteração do loop (aguarda reenvio, se o cliente fizer)
+                continue 
             
             try:
-                # Extraindo os dados da configuração (agora 'config_data' sem o checksum)
                 parts = config_data.split('|')
-                # A linha de código original foi: parts = config_data.split('|'), então removemos a linha config_data = sock_client.recv(1024).decode('utf-8')
                 qnt_pacotes_janela = int(parts[0])
                 total_pacotes_msg = int(parts[1])
                 seq_inicial_msg = int(parts[2].strip()) 
@@ -159,7 +151,7 @@ def comunicacao_cliente(sock_client, modo, seguranca):
                 pacotes_recebidos_total = 0
                 mensagem_completa = ""
                 
-                # Limpa buffer para nova transmissão
+                # limpa o buffer
                 buffer_entrada = ""
                 
                 while pacotes_recebidos_total < total_pacotes_msg:
@@ -169,13 +161,13 @@ def comunicacao_cliente(sock_client, modo, seguranca):
                     
                     pacotes_validos_na_janela = 0
                     
-                    # Usa timeout curto para detectar perda rapidamente
+                    # timeout curto pra detectar perda
                     sock_client.settimeout(WINDOW_RECEIVE_TIMEOUT)
                     
-                    # Loop para consumir a quantidade de pacotes esperados
+                    # loop pra consumir os pacotes esperados
                     for i in range(qnt_esperada_janela):
                         
-                        # --- LÓGICA DE BUFFER PARA SEPARAR PACOTES ---
+                        # lógica de separação de pacotes no buffer
                         try:
                             while '\n' not in buffer_entrada:
                                 temp_data = sock_client.recv(2048).decode('utf-8')
@@ -185,13 +177,12 @@ def comunicacao_cliente(sock_client, modo, seguranca):
                             if '\n' in buffer_entrada:
                                 data_full, buffer_entrada = buffer_entrada.split('\n', 1)
                             else:
-                                data_full = "" # Timeout ou fim de stream sem newline
+                                data_full = "" 
                                 
                         except (socket.timeout, TimeoutError):
                             print(">> [GBN-SERV] Timeout: Cliente parou de enviar (provável perda simulada).")
                             data_full = ""
                             break 
-                        # ---------------------------------------------
 
                         if not data_full:
                             print(">> [GBN-SERV] Sem dados completos (Timeout ou desconexão).")
@@ -229,7 +220,7 @@ def comunicacao_cliente(sock_client, modo, seguranca):
                         else:
                             print(f">> [GBN-SERV] Flag desconhecida: {flag}")
 
-                    # Restaura timeout longo
+                    # restaura o timeout
                     sock_client.settimeout(INACTIVITY_TIMEOUT)
                     
                     # ACK cumulativo
@@ -276,7 +267,7 @@ def comunicacao_cliente(sock_client, modo, seguranca):
 
     print(">> [SERVIDOR] Cliente desconectado!")
 
-# --- LÓGICA DO SERVIDOR SELECTIVE REPEAT (COM SEGURANÇA) ---
+# lógica do server com seleção repetitiva
 def comunicacao_cliente_sr(sock_client, qnt_pacotes_janela, total_pacotes_msg, rec_seq_inicial, seguranca):
     
     print(f"\n>> [SR-SERV] Aguardando {total_pacotes_msg} pacotes (Janela={qnt_pacotes_janela}, Base={rec_seq_inicial})")
@@ -292,7 +283,6 @@ def comunicacao_cliente_sr(sock_client, qnt_pacotes_janela, total_pacotes_msg, r
         try:
             sock_client.settimeout(INACTIVITY_TIMEOUT)
             
-            # --- LÓGICA DE BUFFER PARA SEPARAR PACOTES ---
             try:
                 while '\n' not in buffer_entrada:
                     temp_data = sock_client.recv(2048).decode('utf-8')
@@ -305,7 +295,6 @@ def comunicacao_cliente_sr(sock_client, qnt_pacotes_janela, total_pacotes_msg, r
                     data_full = ""
             except Exception:
                 data_full = ""
-            # ---------------------------------------------
 
             if not data_full:
                 print(">> [SR-SERV] Cliente desconectou ou erro de leitura.")

@@ -3,12 +3,10 @@ import socket
 import time
 from security import SecurityManager
 
-# Timeout configurado para 3.0s conforme solicitado
+# tempo do timeout de retransmissão
 RETRANSMISSION_TIMEOUT = 3.0 
 
-# ==============================================================================
-# FUNÇÕES AUXILIARES
-# ==============================================================================
+# funções auxiliares
 
 def print_titulo(texto):
     print("\n" + "=" * 80)
@@ -34,9 +32,7 @@ def verify_checksum(full_packet: str) -> (bool, str):
     except (ValueError, IndexError):
         return (False, None)
 
-# ==============================================================================
-# LÓGICA DO PROTOCOLO
-# ==============================================================================
+# lógica do protocolo
 
 def handshake(sock):
     print_titulo("INICIANDO HANDSHAKE COM O SERVIDOR")
@@ -119,18 +115,18 @@ def handshake(sock):
 
 
 def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado, seguranca):
-    """
-    Função GBN com Criptografia, 3 ACKs Duplicados e Timeout.
-    """
+
+    # função do modo GBN
+    
     seq_base = seq_inicial 
     total_pacotes = len(pacotes)
     num_pacote_enviado = 0 
 
-    # Variáveis para controle de Fast Retransmit
+    # variáveis para fast retransmit
     acks_duplicados = 0
-    pode_enviar = True  # Controla se devemos enviar dados ou apenas esperar
+    pode_enviar = True 
 
-    # Sorteia qual pacote VAI falhar (se erro for perda)
+    # lógica pra sortear a perda
     pacote_azarado = -1
     if erro_simulado == "3" and total_pacotes > 0:
         pacote_azarado = random.randint(0, total_pacotes - 1)
@@ -141,11 +137,10 @@ def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado, seg
         idx_fim = min(num_pacote_enviado + tamanho_janela, total_pacotes)
         janela = pacotes[idx_inicio:idx_fim]
         
-        # Só entra no bloco de envio se a flag permitir (não estivermos esperando timeout/duplicatas)
         if pode_enviar:
             print(f"\n>> [CLIENTE] Enviando janela (Pacotes {idx_inicio+1} a {idx_fim} de {total_pacotes})... (Base: {seq_base})")
 
-            # --- LOOP DE ENVIO DA JANELA ---
+            # loop de envio da janela
             for i, msg in enumerate(janela):
                 flag = "MSG"
                 seq_atual = seq_base + i
@@ -157,16 +152,15 @@ def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado, seg
                 checksum = calculate_checksum(data_pacote)
                 pacote_msg = f"{data_pacote}|{checksum}"
                 
-                # --- LÓGICA DE PERDA GARANTIDA ---
+                # lógica perda garantida
                 if erro_simulado == "3":
                     if indice_absoluto == pacote_azarado:
                         print(f">> [CLIENTE-ERRO] SIMULANDO PERDA GARANTIDA do pacote {indice_absoluto + 1}/{total_pacotes} (SEQ={seq_atual})...")
                         pacote_azarado = -1 
                         time.sleep(0.01)
-                        continue # Pula o envio (simula a perda)
-                # ------------------------------------------------
+                        continue 
 
-                # --- LÓGICA DE CORRUPÇÃO ---
+                # lógica do modo corrompido
                 elif erro_simulado == "4" and random.random() < 0.10: 
                     dados_corrompidos = data_pacote + "X" 
                     pacote_corrompido = f"{dados_corrompidos}|{checksum}"
@@ -175,16 +169,14 @@ def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado, seg
                     time.sleep(0.01)
                     continue 
 
-                # Envio Normal
+                # envio normal
                 print(f">> [CLIENTE] Enviando pacote {indice_absoluto + 1}/{total_pacotes} (SEQ={seq_atual}) [Criptografado]")
                 sock.send((pacote_msg + "\n").encode('utf-8'))
                 time.sleep(0.01) 
             
-            # Depois de enviar a janela, bloqueamos novos envios até recebermos confirmação
-            # ou decidirmos retransmitir
             pode_enviar = False
 
-        # --- ESPERA POR RESPOSTA (ACK/NACK) ---
+        # espera por resposta
         try:
             print(">> [CLIENTE] Aguardando confirmação (ACK)...")
             sock.settimeout(RETRANSMISSION_TIMEOUT)
@@ -199,43 +191,39 @@ def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado, seg
             ack_parts = data_ack.split(':')
             ack_num = int(ack_parts[1])
             
-            # O ACK esperado é a base atual + o tamanho da janela que acabamos de mandar
             expected_ack = seq_base + len(janela)
 
             if ack_num >= expected_ack:
-                # SUCESSO: ACK Novo e Válido
+                # ACK novo e válido
                 if data_ack.startswith("ACK"):
                     print(">> [CLIENTE] ACK cumulativo recebido. Janela confirmada.")
                 else: 
                     print(f">> [CLIENTE] NACK recebido ({ack_num}) >= Esperado. Avançando...")
                 
-                # Avança a janela
                 num_pacote_enviado += len(janela) 
                 seq_base += len(janela)
                 
-                # Reseta contadores e permite enviar nova janela
                 acks_duplicados = 0
                 pode_enviar = True
             
             else:
-                # FALHA: Recebemos um ACK antigo (duplicata) ou NACK
+                # falha, ACK antigo ou NACK
                 acks_duplicados += 1
                 print(f">> [CLIENTE] ACK Duplicado/Antigo #{acks_duplicados} recebido (Base: {ack_num}).")
 
                 if acks_duplicados == 3:
                     print(">> [CLIENTE] 3 ACKs Duplicados recebidos -> FAST RETRANSMIT!")
                     acks_duplicados = 0
-                    pode_enviar = True # Libera para retransmitir IMEDIATAMENTE
+                    pode_enviar = True 
                 else:
-                    pode_enviar = False # Mantém bloqueado, vai cair no socket.recv de novo ou timeout
+                    pode_enviar = False 
                     continue
 
         except (socket.timeout, TimeoutError):
-            # TIMEOUT: Se o servidor não responder a tempo (ou a gente ficou esperando duplicatas que não vieram)
             print(f">> [CLIENTE] TIMEOUT ({RETRANSMISSION_TIMEOUT}s) — Estourou o tempo limite.")
             print(">> [CLIENTE] Retransmitindo janela por Timeout...")
-            acks_duplicados = 0 # Reseta duplicatas pois o timeout assumiu o controle
-            pode_enviar = True # Força o reenvio
+            acks_duplicados = 0 
+            pode_enviar = True # forçar o reenvio
             continue 
 
     print("\n>> [CLIENTE] Todos os pacotes da mensagem foram enviados com sucesso!")
@@ -244,7 +232,7 @@ def enviar_janela(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado, seg
 
 def enviar_janela_sr(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado, seguranca):
     """
-    Função SR com Criptografia e Erro GARANTIDO.
+    Função do SR
     """
     seq_base = seq_inicial
     proximo_seq = seq_inicial
@@ -346,7 +334,6 @@ def enviar_janela_sr(sock, pacotes, seq_inicial, tamanho_janela, erro_simulado, 
             if seq_base in pacotes_enviados_pendentes:
                 print(f">> [SR-CLIENTE] Retransmitindo pacote {seq_base} (Base) para forçar o ACK...")
                 pacote_retransmitir = pacotes_enviados_pendentes[seq_base]
-                # Adiciona \n na retransmissão também
                 sock.send((pacote_retransmitir + "\n").encode('utf-8'))
             else:
                 if pacotes_enviados_pendentes:
@@ -369,13 +356,10 @@ def dividir_mensagem(tamanho_maximo, mensagem):
 
 def main():
 
-    # =========================================================================
-    # CONFIGURAÇÃO DE SEGURANÇA
-    # =========================================================================
+    # criptografia
     SHARED_KEY = b'Z7w1-8XNf7wJt7rXq4Y5zL3mP9nQ2vR6kS8tV5wX1yZ=' 
     seguranca = SecurityManager(SHARED_KEY)
     print(f">> [SEGURANÇA] Criptografia Ativada.")
-    # =========================================================================
 
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -424,16 +408,14 @@ def main():
             pacotes = dividir_mensagem(tamanho_caracteres, message)
             print(f">> [CLIENTE] Mensagem dividida em {len(pacotes)} pacotes.")
 
-            # --- CORREÇÃO: ADICIONANDO CHECKSUM À MENSAGEM DE CONFIGURAÇÃO ---
             config_data = f"{qnt_pacotes}|{len(pacotes)}|{seq}"
             checksum_config = calculate_checksum(config_data)
             config_msg_full = f"{config_data}|{checksum_config}"
-            # ------------------------------------------------------------------
             
             print(f">> [CLIENTE] Enviando configuração (Janela={qnt_pacotes}, Total={len(pacotes)}, Base={seq})")
             try:
                 sock.send(config_msg_full.encode('utf-8'))
-                # Pausa para evitar que a configuração cole nos dados
+
                 time.sleep(0.2) 
             except Exception as e:
                 print(f">> [CLIENTE] Erro ao enviar configuração: {e}")
@@ -442,11 +424,9 @@ def main():
             try:
                 if modo == "GoBackN":
                     print_titulo("INICIANDO TRANSFERÊNCIA (MODO GO-BACK-N)")
-                    # Passando o objeto seguranca
                     seq = enviar_janela(sock, pacotes, seq, qnt_pacotes, erro_simulado, seguranca)
                 elif modo == "RepetiçãoSeletiva":
                     print_titulo("INICIANDO TRANSFERÊNCIA (MODO REPETIÇÃO SELETIVA)")
-                    # Passando o objeto seguranca
                     seq = enviar_janela_sr(sock, pacotes, seq, qnt_pacotes, erro_simulado, seguranca)
                 else:
                     print(f">> [CLIENTE] Modo desconhecido recebido do handshake: {modo}")
