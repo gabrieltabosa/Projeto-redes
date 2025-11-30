@@ -1,38 +1,91 @@
-# Projeto Redes – Handshake TCP Simulado
 
-## 📌 Descrição
-Este projeto por enquanto implementa um **handshake de 3 vias** (SYN → SYN-ACK → ACK) entre **Cliente** e **Servidor**, simulando o processo de estabelecimento de conexão no protocolo TCP.
+# 📡 Simulação de Protocolo RDT (Reliable Data Transfer) sobre TCP
 
-- O **Servidor** fica escutando em `localhost:1500` e aguarda conexões de clientes.
-- O **Cliente** se conecta ao servidor e inicia o processo de handshake.
-- Durante o processo, o cliente pode escolher o **modo de operação** (GoBackN ou Repetição Seletiva) e um tamanho máximo de pacote (`1024`).
+Este projeto implementa uma simulação robusta de protocolos de transferência confiável de dados (RDT) utilizando Sockets em Python. O sistema emula o comportamento da camada de transporte, demonstrando visualmente o funcionamento de janelas deslizantes, criptografia e tratamento de erros.
 
 ---
 
-## ⚙️ Funcionalidades
-### Cliente (`client.py`)
-- Conecta ao servidor em `localhost:1500`.
-- Solicita ao usuário a escolha do **modo de operação**:
-  - `1` → GoBackN  
-  - `2` → Repetição Seletiva  
-- Envia mensagem `SYN|modo|tam_max`.
-- Aguarda resposta `SYN-ACK|modo|tam_max`.
-- Finaliza o handshake enviando `ACK`.
+## 📋 Funcionalidades Implementadas
 
-### Servidor (`server.py`)
-- Cria um socket TCP escutando na porta `1500`.
-- Aceita conexão de um cliente.
-- Processa o `SYN` recebido, valida os parâmetros.
-- Responde com `SYN-ACK|modo|tam_max`.
-- Aguarda o `ACK` final do cliente.
-- Exibe mensagens de log confirmando o sucesso ou falha do processo.
+O projeto suporta dois modos de operação de janelas deslizantes (**Sliding Windows**):
+
+1. **Go-Back-N (GBN):** Utiliza ACKs cumulativos. Se ocorrer erro ou timeout, retransmite toda a janela a partir do pacote perdido.  
+2. **Selective Repeat (SR):** Utiliza ACKs individuais. Retransmite apenas os pacotes específicos que foram perdidos ou corrompidos.
+
+### Destaques Técnicos
+
+- **Handshake de 3 Vias:** Estabelecimento de conexão (SYN, SYN-ACK, ACK) antes da transferência.  
+- **Segurança:** Criptografia simétrica de ponta a ponta utilizando a biblioteca `cryptography` (Fernet).  
+- **Checksum:** Verificação de integridade para detectar dados corrompidos.  
+- **Simulação de Erros Interativa:** Permite injetar falhas propositais para testar a robustez:  
+  - Perda de pacotes (simulada)  
+  - Corrupção de bits  
+  - Pacotes duplicados  
+  - Timeout (atraso na resposta)  
+
+---
+
+## 🛠️ Pré-requisitos e Instalação
+
+Para rodar este projeto, você precisa do **Python 3.x** instalado.  
+Além disso, é necessário instalar a biblioteca de criptografia:
+
+pip install cryptography
+
+---
+
+## 📂 Estrutura dos Arquivos
+
+Certifique-se de que os arquivos do projeto estejam nomeados exatamente desta forma na mesma pasta:
+
+- `client.py` ➝ O código do cliente (interface de envio).  
+- `server.py` ➝ O código do servidor (recebimento e ACKs).  
+- `security.py` ➝ O módulo de segurança (classe `SecurityManager`).  
 
 ---
 
 ## 🚀 Como Executar
 
-1. Abra dois terminais na pasta raiz do projeto.
+O sistema funciona em arquitetura Cliente-Servidor. Você precisará de dois terminais abertos.
 
-### No primeiro terminal, inicie o servidor:
-```bash
-python3 server.py
+### 1. Iniciar o Servidor
+
+No primeiro terminal, execute o servidor. Ele ficará escutando na porta `1500`.
+
+python server.py
+
+### 2. Iniciar o Cliente
+
+No segundo terminal, execute o cliente.
+
+python client.py
+
+---
+
+## 🎮 Guia de Uso Interativo
+
+Após iniciar o `client.py`, siga as instruções no terminal:
+
+1. **Escolha o Protocolo:**  
+   - Digite `1` para **Go-Back-N**  
+   - Digite `2` para **Repetição Seletiva**  
+
+2. **Configuração de Erros (Opcional):**  
+   O sistema perguntará se deseja simular erros.  
+   Se "Sim", você pode escolher qual tipo de erro (ex: Timeout, Perda) deseja forçar para ver o protocolo reagindo.  
+
+3. **Tamanho da Janela (Apenas GBN):**  
+   Defina quantos pacotes podem ser enviados sem confirmação (Ex: 4).  
+
+4. **Envio de Mensagem:**  
+   - Digite a frase que deseja enviar.  
+   - O programa irá fragmentar a frase em pacotes pequenos (4 caracteres), criptografar o conteúdo e enviar seguindo a lógica da janela escolhida.  
+   - Acompanhe no terminal o status de cada pacote (`SEQ`), os `ACKs` recebidos e eventuais retransmissões.  
+
+---
+
+## 🔍 Detalhes de Configuração
+
+- **Porta:** 1500 (Localhost)  
+- **Timeout de Retransmissão:** 3.0 segundos  
+- **Fragmentação:** As mensagens são divididas em blocos de 4 caracteres para facilitar a visualização didática do fluxo de muitos pacotes
