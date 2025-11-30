@@ -13,6 +13,8 @@
 Sistema cliente-servidor que implementa dois protocolos de rede confiáveis (**Go-Back-N** e **Repetição Seletiva**) com criptografia integrada.  
 Permite simular diversos tipos de erro em redes e testar a robustez dos protocolos.
 
+⚠️ **Importante:** Para rodar **tanto o servidor quanto o cliente com criptografia**, é **obrigatório** estar com o **ambiente virtual ativado**, pois a biblioteca `cryptography` está instalada apenas nele.
+
 ---
 
 ## 👥 Integrantes
@@ -49,7 +51,8 @@ pip install cryptography
 
 ---
 
-### **3. Executar o servidor (Terminal 1)**
+### **3. Executar o servidor (Terminal 1)**  
+*(ambiente virtual deve estar ativado)*
 
 ```bash
 python server.py
@@ -57,7 +60,8 @@ python server.py
 
 ---
 
-### **4. Executar o cliente (Terminal 2)**
+### **4. Executar o cliente (Terminal 2)**  
+*(ambiente virtual deve estar ativado)*
 
 ```bash
 python client.py
